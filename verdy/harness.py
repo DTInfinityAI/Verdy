@@ -106,6 +106,7 @@ def evaluate(
     inputs: dict[str, Any] | None = None,
     progress: Callable[[int, int], None] | None = None,
     fingerprint: str = "sha256",
+    trace_sink: Callable[[dict[str, list[float]]], Any] | None = None,
 ) -> EvaluationResult:
     """Run a full evaluation and return the verdict with its evidence report.
 
@@ -117,6 +118,9 @@ def evaluate(
             traces of failed runs.
         inputs: extra entries recorded under ``inputs`` in the report (e.g. config files).
         progress: called with ``(done, total)`` after each run.
+        trace_sink: called with every successful run's trace, e.g. a store's
+            ``put_trace``. The report already records each trace's SHA-256, which is the
+            trace's address in a content-addressed store.
         fingerprint: how the report identifies the backend's credentials:
             ``sha256``, ``hmac`` or ``none`` (see :mod:`verdy.secrets`). Values are
             never recorded.
@@ -142,6 +146,8 @@ def evaluate(
             for scenario in batch:
                 record, trace = _run_one(scenario, backend, policy, evaluator, deciding, config)
                 batch_runs.append(record)
+                if trace is not None and trace_sink is not None:
+                    trace_sink(trace)
                 if trace is not None and (
                     keep_traces is True or (keep_traces == "failures" and record.failed)
                 ):

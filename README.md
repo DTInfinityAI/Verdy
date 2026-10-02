@@ -32,6 +32,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [Verdicts](#verdicts)
 - [Improvement loop](#improvement-loop)
 - [SceneSmith setup](#scenesmith-setup)
+- [Evidence store and history](#evidence-store-and-history)
 - [Command line](#command-line)
 - [API keys](#api-keys)
 - [Documentation](#documentation)
@@ -80,7 +81,7 @@ verdy run run_tuned.yaml
 ```
 
 Optional extras: `pip install -e ".[llm]"` for Claude features (ODD drafting, SceneSmith
-scene prompts), `".[sign]"` for Ed25519 report signatures, `".[dev]"` for tests and
+scene prompts), `".[sign]"` for Ed25519 report signatures, `".[store]"` for the evidence store and history, `".[dev]"` for tests and
 linting.
 
 ---
@@ -143,6 +144,7 @@ Report digest: 0acc9e2b...
 | **Runtime monitors** | The same specs, evaluated online on the robot with past-time STL. |
 | **Improvement loop** | Test, find weaknesses, train on them, re-certify. Plug in any RL or RLHF trainer: a Python class or an external command. |
 | **Human feedback (RLHF)** | Operators compare pairs of runs; a reward model learns what they value. Expert sessions pretrain the policy. |
+| **Evidence store and history** | Traces as content-addressed Parquet, a DuckDB index rebuilt from signed reports, and `verdy history` to track verdicts and catch regressions across policy releases. |
 | **Safe credentials** | API keys come from environment variables or a private secrets file, never configs. Reports store only hashed fingerprints, and logs, errors and reports are redacted. Subprocesses get only the keys they need. |
 
 ---
@@ -295,6 +297,40 @@ stand-in SceneSmith checkout; report anything that differs on a real installatio
 
 ---
 
+## Evidence store and history
+
+Signed reports stay the source of truth. With `pip install -e ".[store]"`, Verdy also keeps
+every run's trace as Parquet in a content-addressed store (`.verdy/store/<sha256>.parquet`,
+at the hash the report already records), and builds a local DuckDB index from reports
+that can always be rebuilt from them. That makes questions across releases one command:
+
+```bash
+cd examples/home_robot
+verdy run run.yaml --store          # home-navigator 1.0.0
+verdy run run_tuned.yaml --store    # 1.1.0
+verdy run run_v1_2.yaml --store     # 1.2.0, a "faster" retune
+verdy history home-navigator --by-spec
+```
+
+```text
+Policy home-navigator
+  Suite: home-robot-kitchen-crossing 0.1.0 | 3 specs, critical+major | p <= 0.05 @ 0.95
+  version        date                verdict        p_fail              bounds   runs     no_collision       reach_goal slow_near_person
+  1.0.0          2026-10-02 14:40:18 FAIL           10.10%     [8.57%, 11.81%]   1000            2.00%            0.00%           10.10%
+  1.1.0          2026-10-02 14:40:26 PASS            2.80%      [2.00%, 3.82%]   1000            0.80%            0.20%            2.50%
+  1.2.0          2026-10-02 14:40:33 INCONCLUSIVE    5.00%      [3.92%, 6.29%]   1000            1.20%            0.00%            4.90%
+                 ^ REGRESSION: verdict PASS -> INCONCLUSIVE (vs 1.1.0)
+```
+
+History compares only verdicts from the same test suite (same ODD, specs and verdict
+rule), and flags a regression when the verdict drops or the failure rate is significantly
+higher. Add `--fail-on-regression` to gate a release in CI. The index is a star schema
+(dimensions: ODD, policy version, spec, backend, scenario; facts: verdicts, rollouts,
+per-spec robustness, feedback), versioned in `verdy/spec/index_v1.sql`. Query it with
+`verdy query "SELECT ..."`. Guide: [docs/evidence-store.md](docs/evidence-store.md).
+
+---
+
 ## Command line
 
 | Command | Purpose |
@@ -306,6 +342,9 @@ stand-in SceneSmith checkout; report anything that differs on a real installatio
 | `verdy plan --max-failure-prob 0.01` | Runs needed to demonstrate a target |
 | `verdy author "description"` | Draft an ODD with Claude |
 | `verdy improve improve.yaml` | Run the closed improvement loop: test, train, re-certify |
+| `verdy run run.yaml --store` | Also keep traces as Parquet and index the report |
+| `verdy history home-navigator` | Verdicts across policy versions, with regressions flagged |
+| `verdy index` / `verdy query "SQL"` | Index reports / query the evidence index |
 | `verdy secrets status` | Which API keys are set, as fingerprints (never values) |
 | `verdy secrets scan .` | Check files for committed credentials |
 | `verdy schema odd` | Print the ODD JSON Schema |
@@ -347,6 +386,7 @@ and everything Verdy prints, logs or stores is redacted. Details:
 | [Evidence ledger](docs/evidence-ledger.md) | Reports, digests, signatures, reproducibility |
 | [Runtime monitors](docs/runtime-monitors.md) | Running specs on the robot |
 | [Improvement loop](docs/improvement-loop.md) | Rewards, RLHF, demonstrations, trainers, re-certification |
+| [Evidence store and history](docs/evidence-store.md) | Parquet traces, the DuckDB index, history and regressions |
 | [Credentials and API keys](docs/secrets.md) | Setting keys safely, fingerprints, leak scanning |
 | [Command-line reference](docs/cli.md) | Commands, options, exit codes, run configs |
 
@@ -367,6 +407,7 @@ Verdy/
 │   ├── verdict/              # Statistics, coverage, decision rule
 │   ├── ledger/               # Hashing, evidence reports, signatures
 │   ├── improve/              # Improvement loop: rewards, RLHF, curriculum, trainers
+│   ├── store/                # Parquet trace store and DuckDB evidence index
 │   ├── secrets.py            # API keys: lookup, fingerprints, redaction
 │   ├── llm.py                # Claude client (key from secrets)
 │   ├── harness.py            # The evaluation pipeline
@@ -467,7 +508,7 @@ output below is real; re-recording produces the same numbers.
 
 ## Project status
 
-Verdy `0.3.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
+Verdy `0.4.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
 formats may change before `1.0`. Known limitations:
 
 - The built-in simulator is a teaching and testing tool. Results from it say nothing about

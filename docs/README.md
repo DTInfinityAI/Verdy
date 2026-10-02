@@ -11,5 +11,6 @@
 | [Evidence ledger](evidence-ledger.md) | Report contents, digests, signing, reproducing runs |
 | [Runtime monitors](runtime-monitors.md) | Running the same specs on the robot |
 | [Improvement loop](improvement-loop.md) | From testing to improving: safety-margin rewards, targeted practice, RLHF, expert demonstrations, plug-in trainers, re-certification |
+| [Evidence store and history](evidence-store.md) | Content-addressed Parquet traces, the DuckDB index, `verdy history` and regression tracking |
 | [Credentials and API keys](secrets.md) | Setting keys safely, fingerprints in reports, leak scanning |
 | [Command-line reference](cli.md) | Every `verdy` command, option and exit code |

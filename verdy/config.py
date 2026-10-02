@@ -25,6 +25,9 @@ directory, and that directory is importable, so ``policy: policy:make_policy`` f
       confidence: 0.95
       min_coverage: 0.8
     output: reports/home_robot.report.json
+    policy_name: home-navigator         # identifies the policy across versions
+    policy_version: 1.0.0               # e.g. a release tag or git commit
+    store: .verdy/store                 # optional: keep traces as Parquet and index reports
     credentials:
       fingerprint: sha256               # sha256 | hmac | none
 
@@ -70,6 +73,9 @@ RUN_CONFIG_SCHEMA = {
     "additionalProperties": False,
     "properties": {
         "name": {"type": "string"},
+        "policy_name": {"type": "string"},
+        "policy_version": {"type": "string"},
+        "store": {"type": "string"},
         "odd": {"type": "string"},
         "specs": {"type": "string"},
         "policy": {

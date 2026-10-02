@@ -22,7 +22,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
-        run: pip install -e ".[dev,sign]"
+        run: pip install -e ".[dev,sign,store]"
       - name: Lint
         run: ruff check .
       - name: Scan for committed credentials

@@ -110,11 +110,23 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"\r  {done}/{total} runs", end="", file=sys.stderr, flush=True)
 
     keep = "failures" if args.traces else cfg.keep_traces
+    inputs: dict[str, Any] = {"config": cfg.raw, "file_sha256": cfg.file_hashes}
+    for key in ("policy_name", "policy_version"):
+        value = getattr(args, key) or cfg.raw.get(key)
+        if value:
+            inputs[key] = value
+    store = None
+    store_path = args.store or (
+        str(cfg.path.parent / cfg.raw["store"]) if cfg.raw.get("store") else None)
+    if store_path:
+        from verdy.store import open_store
+
+        store = open_store(store_path)
     result = evaluate(
         cfg.odd, cfg.specs, cfg.backend, cfg.policy, cfg.sampler, cfg.runs, cfg.verdict,
-        batch_size=cfg.batch_size, keep_traces=keep,
-        inputs={"config": cfg.raw, "file_sha256": cfg.file_hashes},
+        batch_size=cfg.batch_size, keep_traces=keep, inputs=inputs,
         progress=progress, fingerprint=cfg.fingerprint,
+        trace_sink=store.put_trace if store else None,
     )
     if not args.quiet:
         print(file=sys.stderr)
@@ -132,7 +144,89 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"Saved {len(result.traces)} traces to {trace_dir}")
     print(result.summary())
     print(f"Report written to {output}")
+    if store is not None:
+        with store:
+            store.index([output])
+        print(f"Traces stored and report indexed in {store_path}")
     return EXIT_CODES[result.status]
+
+
+def cmd_index(args: argparse.Namespace) -> int:
+    from verdy.store import open_store
+
+    with open_store(args.store) as store:
+        paths = args.paths or (["."] if not args.rebuild else [])
+        result = store.rebuild(paths) if args.rebuild else store.index(paths)
+        for path, reason in result.skipped:
+            print(f"skipped {path}: {reason}")
+        print(f"{'Rebuilt index' if args.rebuild else 'Indexed'}: {len(result.indexed)} "
+              f"report(s) in {args.store}")
+    return 0
+
+
+def _pct(x: float | None) -> str:
+    return "-" if x is None else f"{100 * x:.2f}%"
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    from verdy.store import open_store
+
+    with open_store(args.store) as store:
+        if not args.policy:
+            rows = store.policies()
+            if not rows:
+                print("No reports indexed yet. Run `verdy index` or `verdy run --store`.")
+                return 0
+            print(f"{'policy':<40} {'versions':>8} {'reports':>8}")
+            for name, versions, reports in rows:
+                print(f"{name:<40} {versions:>8} {reports:>8}")
+            return 0
+        history = store.history(args.policy)
+    if not history:
+        print(f"No indexed reports for policy {args.policy!r}.")
+        return 0
+    if args.json:
+        print(json.dumps([h.__dict__ for h in history], indent=2, default=str))
+        return 0
+    regressions = 0
+    for name, suite in dict.fromkeys((h.policy, h.suite) for h in history):
+        rows = [h for h in history if h.policy == name and h.suite == suite]
+        specs = sorted({s for h in rows for s in h.per_spec}) if args.by_spec else []
+        print(f"Policy {name}\n  Suite: {suite}")
+        header = (f"  {'version':<14} {'date':<19} {'verdict':<12} {'p_fail':>8} "
+                  f"{'bounds':>19} {'runs':>6}")
+        header += "".join(f" {s[:16]:>16}" for s in specs)
+        print(header)
+        for h in rows:
+            bounds = f"[{_pct(h.p_lower)}, {_pct(h.p_upper)}]"
+            line = (f"  {h.version[:14]:<14} {h.created_at[:19]:<19} {h.status:<12} "
+                    f"{_pct(h.p_fail):>8} {bounds:>19} {h.n_runs:>6}")
+            line += "".join(f" {_pct(h.per_spec.get(s)):>16}" for s in specs)
+            print(line)
+            if h.regression:
+                regressions += 1
+                print(f"  {'':<14} ^ REGRESSION: {h.regression}")
+        print()
+    if regressions:
+        print(f"{regressions} regression(s) found.")
+    return 1 if regressions and args.fail_on_regression else 0
+
+
+def cmd_query(args: argparse.Namespace) -> int:
+    from verdy.store import open_store
+
+    with open_store(args.store) as store:
+        columns, rows = store.query(args.sql)
+    if args.json:
+        print(json.dumps([dict(zip(columns, r, strict=True)) for r in rows], indent=2,
+                         default=str))
+        return 0
+    widths = [max(len(str(c)), *(len(str(r[i])) for r in rows)) if rows else len(str(c))
+              for i, c in enumerate(columns)]
+    print("  ".join(str(c).ljust(w) for c, w in zip(columns, widths, strict=True)))
+    for r in rows:
+        print("  ".join(str(v).ljust(w) for v, w in zip(r, widths, strict=True)))
+    return 0
 
 
 def cmd_improve(args: argparse.Namespace) -> int:
@@ -265,8 +359,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--key-env", default="VERDY_SIGNING_KEY",
                    help="secret holding the HMAC key (default VERDY_SIGNING_KEY)")
     p.add_argument("--key", help="Ed25519 private key PEM")
+    p.add_argument("--store", nargs="?", const=".verdy/store", default=None,
+                   help="store traces as Parquet and index the report (default path "
+                        ".verdy/store); also settable as 'store' in the run config")
+    p.add_argument("--policy-name", help="policy identity for history (overrides config)")
+    p.add_argument("--policy-version",
+                   help="policy version for history, e.g. a release tag or git commit")
     p.add_argument("-q", "--quiet", action="store_true")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("index", help="index evidence reports into the local store")
+    p.add_argument("paths", nargs="*", help="report files or directories (default: .)")
+    p.add_argument("--store", default=".verdy/store")
+    p.add_argument("--rebuild", action="store_true",
+                   help="drop the index and rebuild it from all known reports")
+    p.set_defaults(func=cmd_index)
+
+    p = sub.add_parser("history", help="verdicts of a policy across versions")
+    p.add_argument("policy", nargs="?", help="policy name (substring match); omit to list")
+    p.add_argument("--store", default=".verdy/store")
+    p.add_argument("--by-spec", action="store_true", help="add per-spec violation rates")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--fail-on-regression", action="store_true",
+                   help="exit with 1 if any regression is found (for CI)")
+    p.set_defaults(func=cmd_history)
+
+    p = sub.add_parser("query", help="run a read-only SQL query on the evidence index")
+    p.add_argument("sql")
+    p.add_argument("--store", default=".verdy/store")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_query)
 
     p = sub.add_parser("improve", help="run the closed improvement loop from a loop config")
     p.add_argument("config")
@@ -326,7 +448,8 @@ def main(argv: list[str] | None = None) -> int:
         handler.addFilter(redacting)
     try:
         return args.func(args)
-    except (ValueError, FileNotFoundError, ImportError, SecretError, RuntimeError) as exc:
+    except (ValueError, FileNotFoundError, ImportError, SecretError, RuntimeError,
+            KeyError) as exc:
         return _err(str(exc))
     finally:
         root.removeFilter(redacting)

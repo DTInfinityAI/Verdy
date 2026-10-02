@@ -4,6 +4,25 @@ All notable changes to Verdy are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.4.0] - 2026-10-02
+
+### Added
+
+- Evidence store (`pip install "verdy[store]"`, `verdy.store`): traces saved as Parquet in
+  a content-addressed store at the `trace_sha256` reports already record, verified on
+  read; a `Store` interface with a local filesystem + DuckDB implementation.
+- Evidence index: a versioned star schema (`verdy/spec/index_v1.sql`) derived from
+  reports, with dimensions for ODD, policy version, spec, backend and scenario, and facts
+  for verdicts, rollouts, per-spec robustness and feedback. Rebuildable from reports;
+  modified reports are rejected and cannot displace genuine ones.
+- `verdy run --store`, `verdy index [--rebuild]`, `verdy history` (verdicts per policy
+  version, grouped by test suite, regressions flagged, `--fail-on-regression` for CI) and
+  `verdy query`.
+- Run config keys `policy_name`, `policy_version` and `store`; `--policy-name` and
+  `--policy-version` on `verdy run`.
+- `trace_sink` option on `verdy.evaluate`.
+- Home-robot release 1.2.0 config for the history demo.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added

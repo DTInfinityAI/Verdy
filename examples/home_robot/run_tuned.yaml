@@ -1,6 +1,8 @@
 # Same tests, more conservative tuning: slower cruise, earlier and longer braking.
 # Expected verdict: PASS.
 name: home_robot_tuned
+policy_name: home-navigator
+policy_version: 1.1.0
 odd: odd.yaml
 specs: specs.yaml
 policy:

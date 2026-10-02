@@ -2,6 +2,8 @@
 # sampling. Runs are weighted, so the failure probability stays an estimate under the
 # nominal ODD distribution; bounds are approximate (see docs/sampling.md).
 name: home_robot_collisions
+policy_name: home-navigator
+policy_version: 1.1.0
 odd: odd.yaml
 specs: specs.yaml
 policy:
