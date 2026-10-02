@@ -36,6 +36,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [API keys](#api-keys)
 - [Documentation](#documentation)
 - [Project structure](#project-structure)
+- [Demo video script](#demo-video-script)
 - [Project status](#project-status)
 - [Contributing](#contributing)
 - [License](#license)
@@ -378,6 +379,89 @@ Verdy/
 ├── docs/                     # Guides and the ODD specification
 └── tests/                    # pytest suite
 ```
+
+---
+
+## Demo video script
+
+A four-minute screen recording that shows Verdy end to end: describe the world, test a
+policy, fix it, improve it automatically, and point at realistic scenes. Every command and
+output below is real; re-recording produces the same numbers.
+
+<details>
+<summary><b>Show the script</b> (8 scenes, about 4 minutes)</summary>
+
+### Before recording
+
+- Install Verdy (`pip install -e .`) and `cd examples/home_robot`. Delete `reports/` for a
+  clean start.
+- Run `verdy improve improve.yaml -q` once beforehand. It takes about 1.5 minutes; record
+  it live and speed it up in editing, or cut to the finished output.
+- Use a large terminal font (18 pt or more) and a dark theme. Keep an editor open beside
+  the terminal for the YAML files.
+- Run `verdy secrets status` off camera first. If any key is set, its line shows a
+  fingerprint, never the key, but check what will be on screen anyway.
+
+### Scene 1: Cold open (0:00 to 0:15)
+
+| On screen | Narration |
+| --- | --- |
+| Title card: **Verdy: a driving test for robot AI**. | "Would you let a robot drive through your kitchen without a driving test? Verdy is that test, for robot AI." |
+
+### Scene 2: The problem (0:15 to 0:35)
+
+| On screen | Narration |
+| --- | --- |
+| Diagram from [How it works](#how-it-works): ODD → sampler → backend → STL scoring → verdict → ledger. | "A robot policy that works in a demo can still fail in the conditions it will actually meet. Verdy samples those conditions, runs the policy in every one of them, scores each run against formal safety rules, and tells you whether it is safe to deploy, and how confident you can be." |
+
+### Scene 3: Describe the world (0:35 to 1:00)
+
+| On screen | Narration |
+| --- | --- |
+| `odd.yaml` in the editor: scroll past `lighting`, `floor_type`, `person_speed`, `sensor_dropout`. | "First, describe where the robot operates. This home robot crosses a kitchen while a person walks across its path. Lighting from dusk to daylight, five floor types including wet tile, people walking at different speeds, and sensor dropouts." |
+| Terminal: `verdy validate odd.yaml specs.yaml` → `odd.yaml: OK (ODD with 8 parameters)`, `specs.yaml: OK (3 STL specs)`. Then `verdy sample odd.yaml -n 3`. | "Verdy checks the description, then turns it into concrete test scenarios. Each row is one situation the robot must handle." |
+
+### Scene 4: The safety rules (1:00 to 1:20)
+
+| On screen | Narration |
+| --- | --- |
+| `specs.yaml`: highlight `always(dist_obstacle >= 0.0)` and `always((dist_obstacle <= 0.5) implies (speed <= 0.3))`. | "Then write the safety rules in Signal Temporal Logic. Never touch the person. Within half a metre, slow to walking-aid speed. Reach the goal within twenty seconds. Verdy doesn't just score pass or fail: it measures by how much each rule was kept or broken." |
+
+### Scene 5: Take the test (1:20 to 2:00)
+
+| On screen | Narration |
+| --- | --- |
+| `verdy run run.yaml` | "Now the test: a thousand scenarios, in about five seconds." |
+| Output: `Verdict: FAIL`, `Runs: 1000 (101 failed, 0 errors)`, `Failure probability: 0.101 [0.08571, 0.1181]`. Highlight the `slow_near_person 101 violations` line. | "Fail. About ten percent of runs break a rule. Mostly, the robot is still moving too fast near the person, and two percent of runs end in a collision. And this is not a hunch: with ninety-five percent confidence, the failure rate is above our five-percent limit." |
+
+### Scene 6: Fix it and prove it (2:00 to 2:30)
+
+| On screen | Narration |
+| --- | --- |
+| `run_tuned.yaml` beside `run.yaml`: `cruise: 0.8`, `slow_radius: 2.5`. Then `verdy run run_tuned.yaml`. | "Slow the cruise speed and brake earlier, then run the same test again." |
+| Output: `Verdict: PASS`, `failure probability is at most 0.03819 (<= 0.05) with 95% confidence`. | "Pass. At most 3.8 percent failures, with ninety-five percent confidence." |
+| `verdy verify reports/home_robot_tuned.report.json` → `digest OK, signature not checked; verdict PASS`. | "Every verdict comes with an evidence report: every input, every run, every score, sealed with a digest and optionally signed, so anyone can audit it." |
+
+### Scene 7: From testing to improving (2:30 to 3:20)
+
+| On screen | Narration |
+| --- | --- |
+| Loop diagram from [Improvement loop](#improvement-loop). | "Verdy doesn't stop at a verdict. Every test shows where the policy is fragile, and that becomes training signal." |
+| `verdy improve improve.yaml` (sped up). Reveal the output line by line. | "Safety margins become rewards. Practice concentrates where the policy failed. Operators compare pairs of runs and pick the better one, and a reward model learns what they value. Recorded expert sessions give the policy a head start." |
+| Highlight `Starting policy: FAIL p_fail=0.114` and `After pretraining on demonstrations: INCONCLUSIVE p_fail=0.062`. | "Learning from the expert's sessions alone nearly halves the failures." |
+| Highlight cycle 2: `kept incumbent (reach_goal regressed ...)`. | "And every candidate is re-certified on scenarios it never trained on. This one was safer, but reached the goal less often, so Verdy kept the old policy. Improvement is proven, not assumed." |
+| Highlight `Final certified policy: PASS p_fail=0.011 (upper 0.01814)`. | "Three cycles later: from eleven percent failures to one percent, certified." |
+| Caption: "Demo: built-in 2D simulator, simulated operator." | "Here the operator is simulated so the demo runs anywhere. With your team, it's real people and real recordings." |
+
+### Scene 8: Realistic scenes, and close (3:20 to 4:00)
+
+| On screen | Narration |
+| --- | --- |
+| [SceneSmith setup](#scenesmith-setup) in the README and `examples/scenesmith/run.yaml`, highlighting `type: scenesmith` and `writer: claude`. | "For realistic homes, Verdy connects to SceneSmith. Claude writes a scene description for every test scenario, SceneSmith builds a simulation-ready scene from it, and its validator judges whether the robot finished the task." |
+| `verdy secrets status`. | "Your API keys stay in environment variables or a private secrets file. Reports record only fingerprints, never the keys." |
+| End card: **Verdy by DeepThought Infinity, DTI.ai** · github.com/DTInfinityAI/Verdy | "Test, find weaknesses, train, re-certify. Robots that get measurably safer every cycle. Verdy." |
+
+</details>
 
 ---
 
