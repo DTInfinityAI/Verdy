@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dti.ai/verdy/spec/odd/0.1.0",
+  "title": "Verdy ODD",
+  "type": "object",
+  "required": ["name", "version", "parameters"],
+  "properties": {
+    "name": {"type": "string"},
+    "version": {"type": "string"},
+    "parameters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "category", "type"],
+        "properties": {
+          "name": {"type": "string"},
+          "category": {"enum": ["environment", "platform", "task", "sensors", "faults"]},
+          "type": {"enum": ["continuous", "categorical", "boolean", "temporal"]},
+          "unit": {"type": "string"},
+          "range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+          "values": {"type": "array"},
+          "distribution": {"type": "string"},
+          "grounding": {
+            "type": "object",
+            "properties": {"runtime": {"type": "string"}, "sim": {"type": "string"}}
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "source": {"enum": ["llm", "human", "log"]},
+              "confidence": {"type": "number"},
+              "approved": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "constraints": {"type": "array", "items": {"type": "string"}}
+  }
+}
