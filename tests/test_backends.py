@@ -7,7 +7,7 @@ from verdy.backends import (
     FunctionBackend,
     HomeNavSim,
     ReplayBackend,
-    SceneSmithBackend,
+    SceneClientBackend,
     TraceError,
     validate_trace,
 )
@@ -97,9 +97,9 @@ class FakeClient:
         self.closed += 1
 
 
-def test_scenesmith_bridge(odd):
+def test_scene_client_bridge(odd):
     client = FakeClient()
-    backend = SceneSmithBackend(client, dt=0.5, horizon=3.0)
+    backend = SceneClientBackend(client, dt=0.5, horizon=3.0)
     backend.bind(odd)
     env = backend.build(scenario(lighting=80))
     assert env["scene"] == {"lighting_lux": 80}
@@ -108,7 +108,7 @@ def test_scenesmith_bridge(odd):
     assert trace["x"] == [0, 1, 2, 2, 2, 2, 2]  # held after done
     assert client.closed == 1
     with pytest.raises(TypeError):
-        SceneSmithBackend(object())
+        SceneClientBackend(object())
 
 
 def test_function_backend():

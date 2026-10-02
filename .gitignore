@@ -9,3 +9,9 @@ build/
 .ruff_cache/
 reports/
 *.report.json
+.verdy/
+# Credentials: never commit these
+.env.*
+secrets.env
+*.key
+*.pem

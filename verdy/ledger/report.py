@@ -11,6 +11,7 @@ from typing import Any
 
 from verdy.ledger.hashing import canonical_json, sha256_of
 from verdy.ledger.signing import SignatureError, sign_digest, verify_signature
+from verdy.secrets import REDACTOR
 
 REPORT_VERSION = "1"
 
@@ -40,7 +41,11 @@ def build_report(
     results: dict[str, Any],
     created_at: str | None = None,
 ) -> dict[str, Any]:
-    """Assemble a report and seal it with a digest over its body."""
+    """Assemble a report and seal it with a digest over its body.
+
+    Every string is passed through the secrets redactor first, so API keys that slip into
+    an error message or a config can never be written to a report.
+    """
     from verdy import __version__
 
     body = {
@@ -52,7 +57,8 @@ def build_report(
         "runs": runs,
         "results": results,
     }
-    return {**json.loads(canonical_json(body)), "integrity": {"body_sha256": sha256_of(body)}}
+    body = REDACTOR.scrub(json.loads(canonical_json(body)))  # no credential ever lands here
+    return {**body, "integrity": {"body_sha256": sha256_of(body)}}
 
 
 def _body(report: dict[str, Any]) -> dict[str, Any]:

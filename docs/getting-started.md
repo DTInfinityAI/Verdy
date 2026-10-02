@@ -14,7 +14,7 @@ pip install -e .                   # add [llm], [sign] or [dev] for the extras
 
 | Extra | Adds |
 | --- | --- |
-| `llm` | `verdy author`: draft ODDs with Claude (`anthropic`) |
+| `llm` | Claude features: `verdy author` and SceneSmith scene prompts (`anthropic`) |
 | `sign` | Ed25519 report signatures (`cryptography`) |
 | `dev` | `pytest` and `ruff` |
 
@@ -55,9 +55,13 @@ one with `verdy verify reports/home_robot_tuned.report.json`.
    verdy author "Warehouse AMR, 0.5-2 m/s, forklift traffic, dim aisles at night" -o odd.yaml
    ```
 
+   Claude features read your key from the `ANTHROPIC_API_KEY` environment variable or
+   from `~/.config/verdy/secrets.env`; see [credentials](secrets.md).
+
 2. **Write the safety requirements** as STL specs ([guide](stl-specs.md)).
 3. **Connect a backend** that can run your policy and record the signals your specs use:
-   your simulator, recorded logs or a HIL rig ([guide](backends.md)).
+   your simulator, SceneSmith-generated scenes, recorded logs or a HIL rig
+   ([guide](backends.md)).
 4. **Wrap the policy** as `act(observation) -> action`.
 5. **Write a run config** and pick the target failure probability and confidence
    ([verdicts](verdicts.md)). `verdy plan --max-failure-prob 0.01` tells you roughly how

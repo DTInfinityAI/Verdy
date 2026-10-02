@@ -1,0 +1,33 @@
+# Evaluate a pick-and-place policy on SceneSmith-generated homes.
+#
+# Needs: a SceneSmith checkout with its environment installed (see README.md here), the
+# OPENAI_API_KEY secret for SceneSmith's agents, and ANTHROPIC_API_KEY for Claude prompts.
+# Keys are never written in this file: set them as environment variables or in the Verdy
+# secrets file. `verdy secrets status` shows what is set.
+name: scenesmith_pick_place
+odd: odd.yaml
+specs: specs.yaml
+policy: policy:DoNothingPolicy        # replace with your robot policy
+backend:
+  type: scenesmith
+  options:
+    task: Find the target object and place it on the main table or desk in the room.
+    scenesmith_dir: ~/scenesmith        # or set $SCENESMITH_DIR and remove this line
+    cache_dir: .verdy/scenesmith        # generated scenes are cached here and reused
+    prompt:
+      writer: claude                    # uses your ANTHROPIC_API_KEY
+      effort: medium
+    secrets: [OPENAI_API_KEY]           # required by SceneSmith; names only, never values
+    optional_secrets: [GOOGLE_API_KEY]  # only for SceneSmith's Gemini image backend
+    extra_env: {WANDB_MODE: disabled}
+    vision: true
+sampler: stratified
+runs: 20                                # scene generation takes minutes per scene
+seed: 3
+verdict:
+  max_failure_prob: 0.2
+  confidence: 0.9
+  fail_on: [critical]
+credentials:
+  fingerprint: hmac                     # needs VERDY_FINGERPRINT_KEY; or sha256 / none
+output: reports/scenesmith_pick_place.report.json

@@ -1,0 +1,61 @@
+spec_version: 0.2.0
+name: home-pick-and-place
+version: 0.1.0
+description: >
+  Household rooms where a mobile manipulator must find an object and place it somewhere
+  else. Scenes are generated with SceneSmith from each sampled scenario.
+
+parameters:
+  - name: room_type
+    description: Room the task takes place in.
+    category: environment
+    type: categorical
+    values: [kitchen, living room, bedroom, home office]
+    weights: [0.4, 0.3, 0.2, 0.1]
+    grounding: {sim: room_type}
+    provenance: {source: human, approved: true}
+
+  - name: clutter
+    description: How many unrelated small objects are on surfaces.
+    category: environment
+    type: categorical
+    values: [tidy, moderate, cluttered]
+    weights: [0.3, 0.5, 0.2]
+    grounding: {sim: clutter}
+    provenance: {source: human, approved: true}
+
+  - name: room_area
+    description: Floor area of the room.
+    category: environment
+    type: continuous
+    unit: m^2
+    range: [8, 30]
+    distribution: triangular(14)
+    grounding: {sim: room_area}
+    provenance: {source: human, approved: true}
+
+  - name: target_object
+    description: The object the robot has to move.
+    category: task
+    type: categorical
+    values: [apple, mug, book, remote control]
+    grounding: {sim: target_object}
+    provenance: {source: human, approved: true}
+
+  - name: target_on_high_shelf
+    description: Whether the target starts on a shelf above shoulder height.
+    category: task
+    type: boolean
+    distribution: bernoulli(0.2)
+    grounding: {sim: target_on_high_shelf}
+    provenance: {source: human, approved: true}
+
+  - name: lighting
+    description: Ambient light level.
+    category: environment
+    type: continuous
+    unit: lux
+    range: [30, 800]
+    distribution: loguniform
+    grounding: {sim: lighting}
+    provenance: {source: human, approved: true}

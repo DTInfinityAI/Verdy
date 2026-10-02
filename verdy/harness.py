@@ -14,6 +14,7 @@ from verdy.ledger import build_report, sha256_of
 from verdy.metrics.stl import STLEvaluator, STLSpec
 from verdy.odd.model import ODD
 from verdy.sampler.base import Sampler, Scenario
+from verdy.secrets import describe_secrets, redact
 from verdy.verdict import (
     CoverageReport,
     FailureEstimate,
@@ -34,6 +35,7 @@ class RunRecord:
     error: str | None = None
     trace_sha256: str | None = None
     duration_s: float = 0.0
+    backend_info: dict[str, Any] = field(default_factory=dict)
 
     @property
     def score(self) -> float:
@@ -49,6 +51,7 @@ class RunRecord:
             "error": self.error,
             "trace_sha256": self.trace_sha256,
             "duration_s": round(self.duration_s, 4),
+            **({"backend": self.backend_info} if self.backend_info else {}),
         }
 
 
@@ -102,6 +105,7 @@ def evaluate(
     keep_traces: bool | str = False,
     inputs: dict[str, Any] | None = None,
     progress: Callable[[int, int], None] | None = None,
+    fingerprint: str = "sha256",
 ) -> EvaluationResult:
     """Run a full evaluation and return the verdict with its evidence report.
 
@@ -113,12 +117,16 @@ def evaluate(
             traces of failed runs.
         inputs: extra entries recorded under ``inputs`` in the report (e.g. config files).
         progress: called with ``(done, total)`` after each run.
+        fingerprint: how the report identifies the backend's credentials:
+            ``sha256``, ``hmac`` or ``none`` (see :mod:`verdy.secrets`). Values are
+            never recorded.
     """
     config = verdict or VerdictConfig()
     evaluator = STLEvaluator(specs)
     deciding = [s.name for s in specs if s.severity in config.fail_on]
     if not deciding:
         raise ValueError(f"no spec has a severity in fail_on={config.fail_on}")
+    credentials = describe_secrets(backend.secret_names(), fingerprint)
     if batch_size is None:
         batch_size = 50 if sampler.adaptive else max(n_runs, 1)
 
@@ -168,6 +176,8 @@ def evaluate(
         "specs_sha256": sha256_of([s.to_dict() for s in specs]),
         "policy": policy_api.describe(policy),
         "backend": backend.name,
+        "backend_config": backend.config(),
+        "credentials": {"fingerprint": fingerprint, "secrets": credentials},
         "sampler": sampler.config(),
         "n_runs_requested": n_runs,
         "batch_size": batch_size,
@@ -195,16 +205,18 @@ def _run_one(
     config: VerdictConfig,
 ) -> tuple[RunRecord, dict[str, list[float]] | None]:
     start = time.perf_counter()
+    env = None
     try:
         env = backend.build(scenario.to_dict())
         trace = validate_trace(backend.rollout(env, policy, scenario.seed), evaluator.signals)
         robustness = evaluator.robustness(trace)
     except Exception as exc:  # a crashing run is evidence too: record it, don't abort
-        detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+        detail = redact("".join(traceback.format_exception_only(type(exc), exc)).strip())
         return (
             RunRecord(
                 scenario, {}, [], config.errors_as_failures, error=detail,
                 duration_s=time.perf_counter() - start,
+                backend_info=_describe(backend, env),
             ),
             None,
         )
@@ -212,6 +224,15 @@ def _run_one(
     failed = any(name in violated for name in deciding)
     record = RunRecord(
         scenario, robustness, violated, failed, trace_sha256=sha256_of(trace),
-        duration_s=time.perf_counter() - start,
+        duration_s=time.perf_counter() - start, backend_info=_describe(backend, env),
     )
     return record, trace
+
+
+def _describe(backend: Backend, env: object) -> dict[str, Any]:
+    if env is None:
+        return {}
+    try:
+        return backend.describe(env)
+    except Exception as exc:  # reporting must never sink a run
+        return {"describe_error": redact(str(exc))}

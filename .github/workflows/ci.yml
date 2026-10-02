@@ -25,6 +25,8 @@ jobs:
         run: pip install -e ".[dev,sign]"
       - name: Lint
         run: ruff check .
+      - name: Scan for committed credentials
+        run: verdy secrets scan .
       - name: Test
         run: pytest
       - name: Example evaluation
