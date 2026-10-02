@@ -12,6 +12,7 @@ $ verdy --help
 | `verdy verify REPORT [--key-env VAR \| --public-key PEM]` | Check a report's digest, and its signature if a key is given. |
 | `verdy plan --max-failure-prob P [--confidence C]` | Number of failure-free runs needed to show failure probability ≤ P. |
 | `verdy author "DESCRIPTION" [-o odd.draft.yaml]` | Draft an ODD with Claude (`pip install "verdy[llm]"`, uses the `ANTHROPIC_API_KEY` secret). |
+| `verdy improve LOOP_CONFIG [--cycles N] [--sign hmac\|ed25519]` | Run the closed improvement loop: diagnose, collect feedback, train, re-certify on held-out scenarios. Exits with the final certified verdict. See [improvement loop](improvement-loop.md). |
 | `verdy secrets status [NAME...] [--fingerprint sha256\|hmac\|none]` | Which secrets are set and where from, with fingerprints. Never prints values. |
 | `verdy secrets scan PATH...` | Find credential-shaped strings in files; exits 1 if any are found. |
 | `verdy schema {odd,stl_specs}` | Print a bundled JSON Schema. |
@@ -32,7 +33,7 @@ $ verdy --help
 
 | Code | Meaning |
 | --- | --- |
-| 0 | `PASS` (or command succeeded) |
+| 0 | `PASS` (or command succeeded). For `verdy improve`: the final certified verdict. |
 | 1 | `FAIL` (or report did not verify) |
 | 2 | Invalid input: bad file, config or arguments |
 | 3 | `INCONCLUSIVE` |

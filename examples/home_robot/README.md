@@ -11,6 +11,9 @@ test question: **is this navigation policy safe enough to deploy?**
 | `run.yaml` | Baseline tuning, 1000 stratified scenarios, target ≤ 5% failures |
 | `run_tuned.yaml` | Same tests, conservative tuning |
 | `run_collisions.yaml` | Collisions only, target ≤ 1%, with importance sampling |
+| `improve.yaml` | Improvement loop: take the baseline from `FAIL` to a certified `PASS` |
+| `simulated_operator.py` | Stand-in operator: expert driving style and pairwise preferences |
+| `demos/operator.jsonl`, `make_demos.py` | Recorded "operator" sessions, and the script that records them |
 
 Scenarios run on Verdy's built-in 2D simulator (`sim2d`), so no external simulator is
 needed. Results describe that simulator, not a real robot.
@@ -43,3 +46,25 @@ verdy run run_collisions.yaml
 
 Failed runs' traces are saved to `reports/<name>_traces/` for debugging. Change the
 tuning in `run.yaml`, or edit `policy.py`, and run again to compare.
+
+## Improve it automatically
+
+```bash
+verdy improve improve.yaml       # about 1.5 minutes
+```
+
+| Stage | Held-out failure rate | Verdict |
+| --- | --- | --- |
+| Starting policy (`run.yaml` tuning) | 11.4% | `FAIL` |
+| After pretraining on the operator's sessions | 6.2% | `INCONCLUSIVE` |
+| Cycle 1 (promoted) | 4.3% | `INCONCLUSIVE` |
+| Cycle 2 (rejected: reached the goal less often) | 2.9% | `PASS` (not promoted) |
+| Cycle 3 (promoted) | 1.1% | `PASS` |
+
+Each cycle diagnoses the current policy, asks the (simulated) operator to compare 30
+pairs of runs, practices on 120 scenarios concentrated where it failed, and is then
+certified, with the incumbent, on 1000 fresh scenarios it never trained on. The final
+policy has 0.3% collisions and still misses the goal in only 0.7% of runs: the
+`reach_goal` guard rejected cycle 2's candidate, which had bought safety by stopping for
+people from 1.3 m away and so reached the goal less often. Results are in `reports/improve/`. See
+[docs/improvement-loop.md](../../docs/improvement-loop.md).

@@ -146,6 +146,8 @@ def import_object(ref: str, base_dir: Path) -> Any:
         # Load files next to the config by path, under a unique name, so two configs with
         # a "policy.py" each never share a cached module.
         path = (base_dir / module_ref).resolve() if module_ref.endswith(".py") else local.resolve()
+        if str(path.parent) not in sys.path:  # let the module import its siblings
+            sys.path.insert(0, str(path.parent))
         digest = hashlib.sha256(str(path).encode()).hexdigest()[:12]
         name = f"verdy_user_{path.stem}_{digest}"
         spec = importlib.util.spec_from_file_location(name, path)
