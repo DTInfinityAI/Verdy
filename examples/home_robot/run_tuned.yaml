@@ -1,0 +1,21 @@
+# Same tests, more conservative tuning: slower cruise, earlier and longer braking.
+# Expected verdict: PASS.
+name: home_robot_tuned
+odd: odd.yaml
+specs: specs.yaml
+policy:
+  factory: policy:make_policy
+  args: {cruise: 0.8, slow_radius: 2.5, stop_radius: 0.9, memory: 0.6}
+backend:
+  type: sim2d
+  options: {dt: 0.1, horizon: 20.0}
+sampler: stratified
+runs: 1000
+seed: 7
+verdict:
+  max_failure_prob: 0.05
+  confidence: 0.95
+  min_coverage: 0.9
+  fail_on: [critical, major]
+keep_traces: failures
+output: reports/home_robot_tuned.report.json

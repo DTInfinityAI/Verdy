@@ -1,0 +1,17 @@
+name: home-robot-safety
+version: 0.1.0
+specs:
+  - name: no_collision
+    description: The robot never touches the person.
+    severity: critical
+    formula: always(dist_obstacle >= 0.0)
+
+  - name: slow_near_person
+    description: Within 0.5 m of the person, the robot moves at walking-aid speed or slower.
+    severity: major
+    formula: always((dist_obstacle <= 0.5) implies (speed <= 0.3))
+
+  - name: reach_goal
+    description: The robot reaches the goal within 20 seconds.
+    severity: minor
+    formula: eventually[0:20](dist_goal <= 0.2)

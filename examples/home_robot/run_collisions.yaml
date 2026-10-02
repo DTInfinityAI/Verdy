@@ -1,0 +1,23 @@
+# Focus on the critical spec with a tighter target, using failure-seeking importance
+# sampling. Runs are weighted, so the failure probability stays an estimate under the
+# nominal ODD distribution; bounds are approximate (see docs/sampling.md).
+name: home_robot_collisions
+odd: odd.yaml
+specs: specs.yaml
+policy:
+  factory: policy:make_policy
+  args: {cruise: 0.8, slow_radius: 2.5, stop_radius: 0.9, memory: 0.6}
+backend:
+  type: sim2d
+  options: {dt: 0.1, horizon: 20.0}
+sampler:
+  type: importance
+  options: {elite_fraction: 0.2, defensive: 0.3}
+runs: 1000
+batch_size: 100
+seed: 11
+verdict:
+  max_failure_prob: 0.01
+  confidence: 0.95
+  fail_on: [critical]
+output: reports/home_robot_collisions.report.json

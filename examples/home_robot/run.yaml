@@ -1,0 +1,20 @@
+# Baseline: the navigator with its default tuning. Expected verdict: FAIL.
+name: home_robot_baseline
+odd: odd.yaml
+specs: specs.yaml
+policy:
+  factory: policy:make_policy
+  args: {cruise: 1.0, slow_radius: 1.5, stop_radius: 0.6, memory: 0.3}
+backend:
+  type: sim2d
+  options: {dt: 0.1, horizon: 20.0}
+sampler: stratified
+runs: 1000
+seed: 7
+verdict:
+  max_failure_prob: 0.05      # at most 1 in 20 runs may violate a critical or major spec
+  confidence: 0.95
+  min_coverage: 0.9
+  fail_on: [critical, major]  # reach_goal is "minor": reported, but not part of the verdict
+keep_traces: failures
+output: reports/home_robot_baseline.report.json

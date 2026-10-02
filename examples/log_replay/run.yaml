@@ -1,0 +1,15 @@
+# Score recorded runs instead of simulating new ones. The policy is not re-run, so the
+# policy entry only labels the report.
+name: log_replay
+odd: ../home_robot/odd.yaml
+specs: ../home_robot/specs.yaml
+policy: replay_policy:RecordedPolicy
+backend: replay
+sampler:
+  type: replay
+  options: {logs: logs}
+verdict:
+  max_failure_prob: 0.05
+  confidence: 0.95
+  fail_on: [critical, major]
+output: reports/log_replay.report.json

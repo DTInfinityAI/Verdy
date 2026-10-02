@@ -1,0 +1,87 @@
+spec_version: 0.2.0
+name: home-robot-kitchen-crossing
+version: 0.1.0
+description: >
+  A mobile home robot drives across a kitchen to a goal while a person walks across its
+  path. Covers indoor lighting from dusk to daylight, common floor surfaces, and typical
+  walking speeds, plus perception range limits and frame dropouts.
+
+parameters:
+  - name: lighting
+    description: Ambient light at floor level.
+    category: environment
+    type: continuous
+    unit: lux
+    range: [20, 1000]
+    distribution: loguniform
+    grounding: {sim: lighting_lux, runtime: /sensors/ambient_light/lux}
+    provenance: {source: human, approved: true}
+
+  - name: floor_type
+    description: Floor surface along the route; sets tyre friction.
+    category: environment
+    type: categorical
+    values: [tile, wood, carpet, rug, wet_tile]
+    weights: [0.35, 0.3, 0.2, 0.1, 0.05]
+    grounding: {sim: floor_type, runtime: /map/floor_type}
+    provenance: {source: human, approved: true}
+
+  - name: person_speed
+    description: Walking speed of the person crossing the robot's path.
+    category: environment
+    type: continuous
+    unit: m/s
+    range: [0.3, 1.8]
+    distribution: normal(1.0, 0.3)
+    grounding: {sim: person_speed}
+    provenance: {source: human, approved: true}
+
+  - name: person_delay
+    description: Time after the robot starts before the person starts walking.
+    category: environment
+    type: temporal
+    unit: s
+    range: [0, 6]
+    grounding: {sim: person_delay}
+    provenance: {source: human, approved: true}
+
+  - name: goal_distance
+    description: Straight-line distance from start to goal.
+    category: task
+    type: continuous
+    unit: m
+    range: [3, 8]
+    grounding: {sim: goal_distance}
+    provenance: {source: human, approved: true}
+
+  - name: max_speed
+    description: Speed limit configured on the robot base.
+    category: platform
+    type: continuous
+    unit: m/s
+    range: [0.5, 1.5]
+    distribution: triangular(1.0)
+    grounding: {sim: max_speed, runtime: /base/config/max_speed}
+    provenance: {source: human, approved: true}
+
+  - name: sensor_range
+    description: Maximum range at which the person detector reports detections.
+    category: sensors
+    type: continuous
+    unit: m
+    range: [1.5, 4.0]
+    grounding: {sim: sensor_range}
+    provenance: {source: log, confidence: 0.9, approved: true}
+
+  - name: sensor_dropout
+    description: Probability that a perception frame is lost.
+    category: faults
+    type: continuous
+    range: [0.0, 0.3]
+    distribution: beta(1, 8)
+    grounding: {sim: sensor_dropout, runtime: /diagnostics/perception/drop_rate}
+    provenance: {source: log, confidence: 0.8, approved: true}
+
+constraints:
+  # The base's speed governor caps speed on wet floors.
+  - "floor_type != 'wet_tile' or max_speed <= 1.0"

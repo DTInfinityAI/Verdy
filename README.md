@@ -2,9 +2,10 @@
 
 **A driving test for robot AI.**
 
+[![CI](https://github.com/DTInfinityAI/Verdy/actions/workflows/ci.yml/badge.svg)](https://github.com/DTInfinityAI/Verdy/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
-![Status: early development](https://img.shields.io/badge/status-early%20development-orange.svg)
+![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)
+![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)
 
 Verdy tells you whether a robot policy is safe to deploy, and how confident you can be.
 
@@ -20,13 +21,15 @@ Describe your operating conditions, and Verdy:
 ## Table of contents
 
 - [How it works](#how-it-works)
+- [Quick start](#quick-start)
+- [Example](#example)
 - [Key features](#key-features)
 - [Verdicts](#verdicts)
-- [Getting started](#getting-started)
-- [Defining an ODD](#defining-an-odd)
-- [Writing a backend](#writing-a-backend)
+- [Command line](#command-line)
+- [Documentation](#documentation)
 - [Project structure](#project-structure)
 - [Project status](#project-status)
+- [Contributing](#contributing)
 - [License](#license)
 
 ---
@@ -43,12 +46,76 @@ Describe your operating conditions, and Verdy:
 
 | Stage | What it does |
 | --- | --- |
-| **ODD spec** | A typed, versioned description of the *Operational Design Domain*: the conditions the robot is expected to operate in. |
-| **Scenario sampler** | Draws concrete scenarios from the ODD using stratified coverage, log replay, or failure-seeking importance sampling. |
-| **Execution backend** | Turns each scenario into a runnable environment and rolls out the policy, producing a time-stamped signal trace. |
-| **STL scoring** | Evaluates each trace against Signal Temporal Logic safety specs (via [RTAMT](https://github.com/nickovic/rtamt)) and reports robustness margins. |
-| **Statistical verdict** | Aggregates the runs into failure-probability bounds, coverage, and a final decision. |
-| **Evidence ledger** | Hashes inputs and records everything needed to reproduce the result as a signed report. |
+| **ODD spec** | A typed, versioned description of the *Operational Design Domain*: the conditions the robot must handle, how often each occurs, and which combinations are impossible. |
+| **Scenario sampler** | Draws concrete scenarios from the ODD: stratified coverage, log replay, or failure-seeking importance sampling. |
+| **Execution backend** | Runs the policy in each scenario and records a time-stamped trace of signals. |
+| **STL scoring** | Scores every trace against Signal Temporal Logic safety specs (via [RTAMT](https://github.com/nickovic/rtamt)), as robustness margins rather than just pass/fail. |
+| **Statistical verdict** | Turns the runs into a failure-probability estimate with confidence bounds, measures ODD coverage, and decides `PASS`, `FAIL` or `INCONCLUSIVE`. |
+| **Evidence ledger** | Writes a report with every input, run and result, sealed with a digest and optionally signed. |
+
+---
+
+## Quick start
+
+**Requirements:** Python 3.10, 3.11 or 3.12.
+
+```bash
+git clone https://github.com/DTInfinityAI/Verdy.git
+cd Verdy
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e .
+
+cd examples/home_robot
+verdy run run_tuned.yaml
+```
+
+Optional extras: `pip install -e ".[llm]"` for LLM-assisted ODD authoring with Claude,
+`".[sign]"` for Ed25519 report signatures, `".[dev]"` for tests and linting.
+
+---
+
+## Example
+
+[`examples/home_robot`](examples/home_robot) tests a home robot that drives across a kitchen
+while a person walks across its path, on Verdy's built-in simulator. The ODD varies
+lighting, floor type, walking speed and timing, route length, speed limit, sensor range
+and frame dropouts. Three safety specs:
+
+```yaml
+specs:
+  - name: no_collision
+    severity: critical
+    formula: always(dist_obstacle >= 0.0)
+  - name: slow_near_person
+    severity: major
+    formula: always((dist_obstacle <= 0.5) implies (speed <= 0.3))
+  - name: reach_goal
+    severity: minor
+    formula: eventually[0:20](dist_goal <= 0.2)
+```
+
+Target: at most 5% of runs violate a critical or major spec, with 95% confidence.
+
+```console
+$ verdy run run_tuned.yaml
+Verdict: PASS
+  - failure probability is at most 0.03819 (<= 0.05) with 95% confidence
+Runs: 1000 (28 failed, 0 errors)
+Failure probability: 0.028 [0.01997, 0.03819] at 95% (clopper-pearson)
+ODD coverage: 95%, pairwise 89%
+Per spec:
+  no_collision                 8 violations  p=0.008 (upper 0.01439)
+  slow_near_person            25 violations  p=0.025 (upper 0.03474)
+  reach_goal                   2 violations  p=0.002 (upper 0.006282)
+Report digest: 0acc9e2b...
+```
+
+| Config | Policy tuning | Verdict |
+| --- | --- | --- |
+| `run.yaml` | Baseline | `FAIL`: 10.1% of runs fail, lower bound 8.6% |
+| `run_tuned.yaml` | Slower, earlier braking | `PASS`: 2.8% fail, upper bound 3.8% |
+| `run_collisions.yaml` | Collisions only, target ≤ 1%, importance sampling | `INCONCLUSIVE`: more runs needed |
 
 ---
 
@@ -56,131 +123,61 @@ Describe your operating conditions, and Verdy:
 
 | Feature | Description |
 | --- | --- |
-| **ODD specs** | Describe operating domains in a typed, versioned schema, with LLM-assisted authoring. |
-| **Scenario sampling** | Coverage-driven sampling, log replay, and failure-seeking importance sampling. |
-| **Backend-agnostic** | Works with SceneSmith, custom simulators, log replay, and hardware-in-the-loop (HIL). |
-| **STL scoring** | Signal Temporal Logic scoring that reports robustness margins, not just pass/fail. |
-| **Statistical verdicts** | Failure-probability bounds and coverage reports. |
-| **Runtime monitors** | The same specs, deployed on the robot. |
+| **ODD specs** | Typed, versioned [schema](docs/odd-spec.md) with distributions, constraints, simulator and runtime grounding, and provenance. LLM-assisted authoring with Claude, with human approval tracked per parameter. |
+| **Scenario sampling** | Stratified (Latin hypercube) coverage, log replay, and cross-entropy importance sampling with likelihood-ratio weights. |
+| **Backend-agnostic** | Built-in 2D simulator, log replay, a SceneSmith bridge, and a two-function adapter for custom simulators and hardware-in-the-loop rigs. |
+| **STL scoring** | Robustness margins per spec, not just pass/fail. |
+| **Statistical verdicts** | Exact Clopper-Pearson bounds (weighted bounds for importance sampling), per-spec estimates, and per-parameter and pairwise coverage reports. |
+| **Evidence ledger** | Every input, run and result in one report with a SHA-256 digest; HMAC or Ed25519 signatures. |
+| **Runtime monitors** | The same specs, evaluated online on the robot with past-time STL. |
 
 ---
 
 ## Verdicts
 
-| Verdict | Meaning |
+Set the highest acceptable failure probability and a confidence level. From the runs,
+Verdy computes one-sided bounds `L` and `U` on the failure probability:
+
+| Verdict | Condition | Meaning |
+| --- | --- | --- |
+| `PASS` | `U ≤ max_failure_prob`, coverage met | Fails at most that often, with the stated confidence. |
+| `FAIL` | `L > max_failure_prob` | Fails more often than allowed, with the stated confidence. |
+| `INCONCLUSIVE` | otherwise | Not enough evidence yet: run more scenarios or cover more of the ODD. |
+
+Details, assumptions and limits: [docs/verdicts.md](docs/verdicts.md).
+
+---
+
+## Command line
+
+| Command | Purpose |
 | --- | --- |
-| `PASS` | The policy met the safety specs across the sampled domain within the stated confidence bounds. |
-| `FAIL` | One or more runs violated a safety spec. |
-| `INCONCLUSIVE` | Not enough evidence yet to reach a confident `PASS` or `FAIL`. |
+| `verdy validate odd.yaml specs.yaml` | Validate ODD and spec files |
+| `verdy sample odd.yaml -n 10` | Preview sampled scenarios |
+| `verdy run run.yaml [--sign hmac]` | Run an evaluation and write the evidence report |
+| `verdy verify report.json` | Check a report's digest and signature |
+| `verdy plan --max-failure-prob 0.01` | Runs needed to demonstrate a target |
+| `verdy author "description"` | Draft an ODD with Claude |
+| `verdy schema odd` | Print the ODD JSON Schema |
 
-Every verdict comes with confidence bounds and a reproducible evidence trail, so results can be audited and re-run.
-
----
-
-## Getting started
-
-**Requirements:** Python 3.10 or newer.
-
-```bash
-git clone https://github.com/DTInfinityAI/Verdy.git
-cd Verdy
-
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
-pip install jsonschema numpy scipy rtamt
-```
-
-Run Python from the repository root so that the `verdy` package can be imported:
-
-```python
-from verdy.backends.base import Backend
-```
-
-> **Note:** `pip install ./verdy` does not work yet. The package uses a flat layout with several top-level packages, which setuptools refuses to auto-discover. Install the dependencies directly as shown above until packaging is fixed.
+`verdy run` exits with 0 for `PASS`, 1 for `FAIL` and 3 for `INCONCLUSIVE`, so it can gate
+a CI pipeline. See [docs/cli.md](docs/cli.md).
 
 ---
 
-## Defining an ODD
+## Documentation
 
-An ODD is a JSON document validated against the meta-schema in [`verdy/spec/odd.schema.json`](verdy/spec/odd.schema.json) (JSON Schema draft 2020-12, spec version `0.1.0`).
-
-**Top-level fields**
-
-| Field | Required | Description |
-| --- | :---: | --- |
-| `name` | ✅ | Name of the operating domain. |
-| `version` | ✅ | Version of this ODD. |
-| `parameters` | ✅ | List of parameters that describe the domain (see below). |
-| `constraints` | | List of constraint expressions, as strings. |
-
-**Parameter fields**
-
-| Field | Required | Description |
-| --- | :---: | --- |
-| `name` | ✅ | Parameter name. |
-| `category` | ✅ | One of `environment`, `platform`, `task`, `sensors`, `faults`. |
-| `type` | ✅ | One of `continuous`, `categorical`, `boolean`, `temporal`. |
-| `unit` | | Unit of measure, e.g. `lux`. |
-| `range` | | `[min, max]` for continuous parameters. |
-| `values` | | Allowed values for categorical parameters. |
-| `distribution` | | Name of the sampling distribution. |
-| `grounding` | | How the parameter maps to the real system: `runtime` and `sim`. |
-| `provenance` | | Where the parameter came from: `source` (`llm`, `human`, `log`), `confidence`, `approved`. |
-
-**Example**
-
-```python
-import json
-import jsonschema
-
-schema = json.load(open("verdy/spec/odd.schema.json"))
-
-odd = {
-    "name": "kitchen-tidy",
-    "version": "0.1.0",
-    "parameters": [
-        {
-            "name": "lighting",
-            "category": "environment",
-            "type": "continuous",
-            "unit": "lux",
-            "range": [50, 1000],
-        },
-        {
-            "name": "floor_type",
-            "category": "environment",
-            "type": "categorical",
-            "values": ["tile", "carpet", "wood"],
-        },
-    ],
-}
-
-jsonschema.validate(odd, schema)  # raises ValidationError if the ODD is invalid
-```
-
----
-
-## Writing a backend
-
-Every execution backend implements the abstract `Backend` class in [`verdy/backends/base.py`](verdy/backends/base.py):
-
-| Method | Description |
+| Guide | |
 | --- | --- |
-| `build(scenario: dict) -> object` | Realize a sampled scenario as a runnable environment. |
-| `rollout(env, policy, seed: int) -> dict` | Run the policy and return a time-stamped trace of signals. |
-
-```python
-from verdy.backends.base import Backend
-
-
-class MySimBackend(Backend):
-    def build(self, scenario: dict) -> object:
-        ...  # create and configure your simulator from the scenario
-
-    def rollout(self, env: object, policy: object, seed: int) -> dict:
-        ...  # step the policy in env and return {"time": [...], "<signal>": [...]}
-```
+| [Getting started](docs/getting-started.md) | Install, run the example, evaluate your own policy |
+| [ODD specification](docs/odd-spec.md) | The ODD document format |
+| [Safety specs (STL)](docs/stl-specs.md) | Writing requirements and how robustness works |
+| [Scenario sampling](docs/sampling.md) | Samplers and when to use them |
+| [Execution backends](docs/backends.md) | Simulators, log replay, SceneSmith, HIL |
+| [Verdicts and statistics](docs/verdicts.md) | The decision rule, bounds and coverage |
+| [Evidence ledger](docs/evidence-ledger.md) | Reports, digests, signatures, reproducibility |
+| [Runtime monitors](docs/runtime-monitors.md) | Running specs on the robot |
+| [Command-line reference](docs/cli.md) | Commands, options, exit codes, run configs |
 
 ---
 
@@ -188,45 +185,47 @@ class MySimBackend(Backend):
 
 ```
 Verdy/
-├── LICENSE
-├── README.md
-└── verdy/
-    ├── pyproject.toml        # Package metadata and dependencies
-    ├── spec/                 # ODD meta-schema (JSON Schema), published as a standalone versioned spec
-    │   └── odd.schema.json
-    ├── odd/                  # ODD parsing, validation, and LLM-assisted authoring
-    ├── sampler/              # Scenario generation: stratified coverage, log replay, importance sampling
-    ├── backends/             # Execution backends behind a common adapter
-    │   ├── base.py           #   Abstract Backend interface
-    │   ├── scenesmith/       #   SceneSmith simulator adapter
-    │   └── replay/           #   Recorded-log replay adapter
-    ├── metrics/              # Signal Temporal Logic specs and robustness scoring (via RTAMT)
-    ├── verdict/              # Failure-probability bounds, coverage, and PASS/FAIL/INCONCLUSIVE rules
-    ├── ledger/               # Input hashing, reproducibility records, and signed evidence reports
-    ├── examples/             # End-to-end demos, starting with a home-robot task on SceneSmith
-    └── docs/                 # Documentation
+├── pyproject.toml            # Package metadata, dependencies, tool settings
+├── verdy/
+│   ├── spec/                 # Versioned JSON Schemas (ODD, STL specs)
+│   ├── odd/                  # ODD model, validation, constraints, LLM authoring
+│   ├── sampler/              # Monte Carlo, stratified, importance, replay samplers
+│   ├── backends/             # Backend interface, sim2d, replay, SceneSmith, function adapter
+│   ├── metrics/              # STL specs and robustness scoring (RTAMT)
+│   ├── monitor/              # Runtime monitors
+│   ├── verdict/              # Statistics, coverage, decision rule
+│   ├── ledger/               # Hashing, evidence reports, signatures
+│   ├── harness.py            # The evaluation pipeline
+│   ├── config.py             # Run-config loading
+│   └── cli.py                # The `verdy` command
+├── examples/
+│   ├── home_robot/           # Full evaluation on the built-in simulator
+│   └── log_replay/           # Scoring recorded runs
+├── docs/                     # Guides and the ODD specification
+└── tests/                    # pytest suite
 ```
 
 ---
 
 ## Project status
 
-Verdy is in **early development**. The project structure and core interfaces are in place, and most modules are still to be implemented.
+Verdy `0.1.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
+formats may change before `1.0`. Known limitations:
 
-| Component | Status |
-| --- | --- |
-| ODD meta-schema (`spec/`) | ✅ Draft `0.1.0` |
-| Backend interface (`backends/base.py`) | ✅ Defined |
-| ODD parsing and LLM authoring (`odd/`) | 🚧 Planned |
-| Scenario sampler (`sampler/`) | 🚧 Planned |
-| SceneSmith and replay backends | 🚧 Planned |
-| STL scoring (`metrics/`) | 🚧 Planned |
-| Statistical verdicts (`verdict/`) | 🚧 Planned |
-| Evidence ledger (`ledger/`) | 🚧 Planned |
-| Home-robot example (`examples/`) | 🚧 Planned |
-| Runtime monitors | 🚧 Planned |
+- The built-in simulator is a teaching and testing tool. Results from it say nothing about
+  a real robot.
+- The SceneSmith bridge needs a small client written against your SceneSmith installation.
+- Importance-sampling bounds are approximate. See [docs/sampling.md](docs/sampling.md).
+- Python 3.13 is not supported until RTAMT's parser runtime supports it.
 
-Built by **DeepThought Infinity (DTI.ai)**.
+Built by **DeepThought Infinity (DTI.ai)**. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). In short: `pip install -e ".[dev,sign]"`, then
+`ruff check .` and `pytest` before opening a pull request.
 
 ---
 

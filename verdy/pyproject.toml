@@ -1,7 +1,0 @@
-[project]
-name = "verdy"
-version = "0.0.1"
-description = "Policy evaluation harness for physical AI"
-requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
-dependencies = ["jsonschema", "numpy", "scipy", "rtamt"]
