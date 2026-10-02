@@ -4,6 +4,24 @@ All notable changes to Verdy are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.5.0] - 2026-10-02
+
+### Added
+
+- Batched trace files: many traces per Parquet file in `.verdy/store/batches/`, one row per
+  trace and signal, sorted by address with small row groups, content-addressed batch
+  names. Addresses are unchanged (`trace_sha256`), so reports and the index need no
+  change. In the home-robot example: 3 files and 7.5 MB instead of 2,962 files holding
+  16.4 MB (35 MB of disk blocks).
+- `verdy store stats` and `verdy store compact` (packs Verdy 0.4 single-file traces into
+  batches, verifying every trace before deleting its file).
+- `Store.flush()`; `verdy run --store` writes traces before the report that references them.
+
+### Changed
+
+- The trace store writes batches by default; single-file traces remain readable and can
+  still be written with `layout="single"`.
+
 ## [0.4.0] - 2026-10-02
 
 ### Added

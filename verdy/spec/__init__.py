@@ -6,7 +6,8 @@ from importlib import resources
 ODD_SPEC_VERSION = "0.2.0"
 STL_SPEC_VERSION = "0.2.0"
 INDEX_SCHEMA_VERSION = 1
-TRACE_FORMAT_VERSION = "1"
+TRACE_FORMAT_VERSION = "1"          # single-file traces: <sha256>.parquet
+TRACE_BATCH_FORMAT_VERSION = "1"    # batched traces: batches/<batch>.parquet
 
 
 @cache

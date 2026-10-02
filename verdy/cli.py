@@ -128,6 +128,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         progress=progress, fingerprint=cfg.fingerprint,
         trace_sink=store.put_trace if store else None,
     )
+    if store is not None:
+        store.flush()  # traces are on disk before the report that points at them
     if not args.quiet:
         print(file=sys.stderr)
     report = result.report
@@ -161,6 +163,37 @@ def cmd_index(args: argparse.Namespace) -> int:
             print(f"skipped {path}: {reason}")
         print(f"{'Rebuilt index' if args.rebuild else 'Indexed'}: {len(result.indexed)} "
               f"report(s) in {args.store}")
+    return 0
+
+
+def _size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+def cmd_store_stats(args: argparse.Namespace) -> int:
+    from verdy.store import ParquetTraceStore
+
+    st = ParquetTraceStore(args.store).stats()
+    print(f"Store {args.store}: {st.traces} traces, {_size(st.bytes_on_disk)}")
+    print(f"  batched:     {st.batched_traces} traces in {st.batch_files} batch file(s)")
+    print(f"  single-file: {st.single_files} trace(s)"
+          + ("  (run `verdy store compact` to batch them)" if st.single_files else ""))
+    return 0
+
+
+def cmd_store_compact(args: argparse.Namespace) -> int:
+    from verdy.store import ParquetTraceStore
+
+    store = ParquetTraceStore(args.store, batch_size=args.batch_size)
+    before = store.stats().bytes_on_disk
+    traces, batches = store.compact(delete=not args.keep)
+    after = store.stats().bytes_on_disk
+    print(f"Packed {traces} single-file trace(s) into {batches} batch file(s); "
+          f"{_size(before)} -> {_size(after)}")
     return 0
 
 
@@ -374,6 +407,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rebuild", action="store_true",
                    help="drop the index and rebuild it from all known reports")
     p.set_defaults(func=cmd_index)
+
+    p = sub.add_parser("store", help="inspect or compact the trace store")
+    store_sub = p.add_subparsers(dest="store_command", required=True)
+    q = store_sub.add_parser("stats", help="traces, files and size of the store")
+    q.add_argument("--store", default=".verdy/store")
+    q.set_defaults(func=cmd_store_stats)
+    q = store_sub.add_parser("compact", help="pack single-file traces into batch files")
+    q.add_argument("--store", default=".verdy/store")
+    q.add_argument("--batch-size", type=int, default=1000, help="traces per batch file")
+    q.add_argument("--keep", action="store_true", help="keep the single files")
+    q.set_defaults(func=cmd_store_compact)
 
     p = sub.add_parser("history", help="verdicts of a policy across versions")
     p.add_argument("policy", nargs="?", help="policy name (substring match); omit to list")

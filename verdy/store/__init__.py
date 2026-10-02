@@ -10,7 +10,7 @@ from pathlib import Path
 
 from verdy.store.base import HistoryRow, IngestResult, Store
 from verdy.store.local import DEFAULT_STORE, LocalStore, StoreError
-from verdy.store.traces import ParquetTraceStore, TraceIntegrityError
+from verdy.store.traces import ParquetTraceStore, TraceIntegrityError, TraceStoreStats
 
 
 def open_store(location: str | Path | None = None) -> Store:
@@ -37,5 +37,6 @@ __all__ = [
     "Store",
     "StoreError",
     "TraceIntegrityError",
+    "TraceStoreStats",
     "open_store",
 ]

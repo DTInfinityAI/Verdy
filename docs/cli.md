@@ -16,6 +16,8 @@ $ verdy --help
 | `verdy index [PATHS...] [--rebuild] [--store PATH]` | Index evidence reports (default: every `*.report.json` under `.`) into the store. `--rebuild` regenerates the index from all known reports. |
 | `verdy history [POLICY] [--by-spec] [--json] [--fail-on-regression]` | Verdicts of a policy across versions, grouped by test suite, with regressions flagged. Without a policy, lists indexed policies. See [evidence store](evidence-store.md). |
 | `verdy query "SQL" [--json]` | Run a read-only SQL query on the evidence index. |
+| `verdy store stats [--store PATH]` | Traces, batch files and size of the trace store. |
+| `verdy store compact [--store PATH] [--batch-size N] [--keep]` | Pack single-file traces (Verdy 0.4) into batch files, verifying each one. |
 | `verdy secrets status [NAME...] [--fingerprint sha256\|hmac\|none]` | Which secrets are set and where from, with fingerprints. Never prints values. |
 | `verdy secrets scan PATH...` | Find credential-shaped strings in files; exits 1 if any are found. |
 | `verdy schema {odd,stl_specs}` | Print a bundled JSON Schema. |
@@ -30,7 +32,7 @@ $ verdy --help
 | `-o, --output PATH` | Report path (default: the config's `output`). |
 | `--traces` | Save traces of failed runs next to the report. |
 | `--sign {hmac,ed25519}` | Sign the report. HMAC reads the secret named by `--key-env` (default `VERDY_SIGNING_KEY`) from the environment or the secrets file; Ed25519 needs `--key PEM`. |
-| `--store [PATH]` | Save every run's trace as Parquet in the store (default `.verdy/store`) and index the report. Needs `pip install "verdy[store]"`. |
+| `--store [PATH]` | Save every run's trace in the store (default `.verdy/store`; batched Parquet) and index the report. Needs `pip install "verdy[store]"`. |
 | `--policy-name NAME`, `--policy-version VERSION` | Policy identity for `verdy history` (override `policy_name` / `policy_version` in the config). |
 | `-q, --quiet` | No progress output. |
 

@@ -300,9 +300,9 @@ stand-in SceneSmith checkout; report anything that differs on a real installatio
 ## Evidence store and history
 
 Signed reports stay the source of truth. With `pip install -e ".[store]"`, Verdy also keeps
-every run's trace as Parquet in a content-addressed store (`.verdy/store/<sha256>.parquet`,
-at the hash the report already records), and builds a local DuckDB index from reports
-that can always be rebuilt from them. That makes questions across releases one command:
+every run's trace as Parquet in a content-addressed store, addressed by the hash the
+report already records and batched many traces per file (3,000 runs: 3 files, 7.5 MB),
+and builds a local DuckDB index from reports that can always be rebuilt from them. That makes questions across releases one command:
 
 ```bash
 cd examples/home_robot
@@ -508,7 +508,7 @@ output below is real; re-recording produces the same numbers.
 
 ## Project status
 
-Verdy `0.4.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
+Verdy `0.5.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
 formats may change before `1.0`. Known limitations:
 
 - The built-in simulator is a teaching and testing tool. Results from it say nothing about
