@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,8 +16,16 @@ from verdy import __version__
 EXIT_CODES = {"PASS": 0, "FAIL": 1, "INCONCLUSIVE": 3}
 
 
+DEFAULT_SECRET_NAMES = [
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "VERDY_SIGNING_KEY",
+    "VERDY_FINGERPRINT_KEY",
+]
+
+
 def _err(message: str) -> int:
-    print(f"error: {message}", file=sys.stderr)
+    from verdy.secrets import redact
+
+    print(f"error: {redact(message)}", file=sys.stderr)
     return 2
 
 
@@ -79,11 +86,10 @@ def cmd_sample(args: argparse.Namespace) -> int:
 
 
 def _signing_key(args: argparse.Namespace) -> Any:
+    from verdy.secrets import get_secret
+
     if args.sign == "hmac":
-        key = os.environ.get(args.key_env)
-        if not key:
-            raise ValueError(f"set {args.key_env} to the HMAC secret")
-        return key
+        return get_secret(args.key_env).reveal()
     if not args.key:
         raise ValueError("--key PATH to an Ed25519 private key PEM is required")
     return Path(args.key)
@@ -107,7 +113,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         cfg.odd, cfg.specs, cfg.backend, cfg.policy, cfg.sampler, cfg.runs, cfg.verdict,
         batch_size=cfg.batch_size, keep_traces=keep,
         inputs={"config": cfg.raw, "file_sha256": cfg.file_hashes},
-        progress=progress,
+        progress=progress, fingerprint=cfg.fingerprint,
     )
     if not args.quiet:
         print(file=sys.stderr)
@@ -132,11 +138,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
     from verdy.ledger import IntegrityError, SignatureError, read_report, verify_report
 
     report = read_report(args.report)
+    from verdy.secrets import get_secret
+
     key: Any = None
     if args.key_env:
-        key = os.environ.get(args.key_env)
-        if not key:
-            return _err(f"{args.key_env} is not set")
+        key = get_secret(args.key_env).reveal()
     elif args.public_key:
         key = Path(args.public_key)
     try:
@@ -176,6 +182,34 @@ def cmd_author(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_secrets_status(args: argparse.Namespace) -> int:
+    from verdy.secrets import describe_secrets, secrets_file_path
+
+    names = args.names or DEFAULT_SECRET_NAMES
+    print(f"Secrets file: {secrets_file_path()}"
+          + ("" if secrets_file_path().is_file() else " (not present)"))
+    for name, info in describe_secrets(names, args.fingerprint).items():
+        if not info["set"]:
+            print(f"  {name:<24} not set")
+        else:
+            fp = info["fingerprint"] or "(fingerprint disabled)"
+            print(f"  {name:<24} set ({info['source']})  {fp}")
+    return 0
+
+
+def cmd_secrets_scan(args: argparse.Namespace) -> int:
+    from verdy.secrets import scan_files
+
+    hits = scan_files(args.paths)
+    for path, line in hits:
+        print(f"{path}:{line}: possible credential")
+    if hits:
+        print(f"{len(hits)} possible credential(s) found. Remove them and rotate the keys.")
+        return 1
+    print("No credentials found.")
+    return 0
+
+
 def cmd_schema(args: argparse.Namespace) -> int:
     from verdy.spec import load_schema
 
@@ -212,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--traces", action="store_true", help="save traces of failed runs")
     p.add_argument("--sign", choices=["hmac", "ed25519"], help="sign the report")
     p.add_argument("--key-env", default="VERDY_SIGNING_KEY",
-                   help="env var holding the HMAC secret (default VERDY_SIGNING_KEY)")
+                   help="secret holding the HMAC key (default VERDY_SIGNING_KEY)")
     p.add_argument("--key", help="Ed25519 private key PEM")
     p.add_argument("-q", "--quiet", action="store_true")
     p.set_defaults(func=cmd_run)
@@ -220,7 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify", help="check a report's digest and signature")
     p.add_argument("report")
     group = p.add_mutually_exclusive_group()
-    group.add_argument("--key-env", help="env var holding the HMAC secret")
+    group.add_argument("--key-env", help="secret holding the HMAC key")
     group.add_argument("--public-key", help="Ed25519 public key PEM")
     p.set_defaults(func=cmd_verify)
 
@@ -236,6 +270,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default="claude-opus-5-5")
     p.set_defaults(func=cmd_author)
 
+    p = sub.add_parser("secrets", help="check credentials without revealing them")
+    secrets_sub = p.add_subparsers(dest="secrets_command", required=True)
+    q = secrets_sub.add_parser("status", help="which secrets are set, with fingerprints")
+    q.add_argument("names", nargs="*", help=f"default: {' '.join(DEFAULT_SECRET_NAMES)}")
+    q.add_argument("--fingerprint", default="sha256", choices=["sha256", "hmac", "none"])
+    q.set_defaults(func=cmd_secrets_status)
+    q = secrets_sub.add_parser("scan", help="find credential-looking strings in files")
+    q.add_argument("paths", nargs="+")
+    q.set_defaults(func=cmd_secrets_scan)
+
     p = sub.add_parser("schema", help="print a bundled JSON Schema")
     p.add_argument("name", choices=["odd", "stl_specs"])
     p.set_defaults(func=cmd_schema)
@@ -243,11 +287,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import logging
+
+    from verdy.secrets import RedactingFilter, SecretError
+
     args = build_parser().parse_args(argv)
+    redacting = RedactingFilter()
+    root = logging.getLogger()
+    root.addFilter(redacting)
+    for handler in root.handlers:
+        handler.addFilter(redacting)
     try:
         return args.func(args)
-    except (ValueError, FileNotFoundError, ImportError) as exc:
+    except (ValueError, FileNotFoundError, ImportError, SecretError, RuntimeError) as exc:
         return _err(str(exc))
+    finally:
+        root.removeFilter(redacting)
+        for handler in root.handlers:
+            handler.removeFilter(redacting)
 
 
 if __name__ == "__main__":

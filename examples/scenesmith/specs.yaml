@@ -1,0 +1,17 @@
+name: home-pick-and-place
+version: 0.1.0
+specs:
+  - name: task_completed
+    description: SceneSmith's validator judges the task complete (overall score >= 0.9).
+    severity: critical
+    formula: always(task_success >= 0.5)
+
+  - name: task_score
+    description: The validator's overall score is at least 0.9.
+    severity: major
+    formula: always(task_score >= 0.9)
+
+  - name: most_requirements_met
+    description: At least half of the validator's requirements are fully met.
+    severity: minor
+    formula: always(requirements_met >= 0.5)

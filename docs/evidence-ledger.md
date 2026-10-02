@@ -7,10 +7,15 @@ verdict.
 | --- | --- |
 | `report_version`, `verdy_version`, `created_at` | Format and tool versions, UTC timestamp |
 | `environment` | Python version, platform, versions of `verdy`, `numpy`, `scipy`, `rtamt`, `jsonschema` |
-| `inputs` | Full ODD and specs with SHA-256 digests, policy reference, backend, sampler settings and seed, verdict config, run config, SHA-256 of the config, ODD and specs files |
-| `runs` | Per run: scenario id, parameters, seed, weight, robustness per spec, violated specs, failed flag, error, trace SHA-256, duration |
+| `inputs` | Full ODD and specs with SHA-256 digests, policy reference, backend and its settings, sampler settings and seed, verdict config, run config, SHA-256 of the config, ODD and specs files, and fingerprints of the credentials used |
+| `runs` | Per run: scenario id, parameters, seed, weight, robustness per spec, violated specs, failed flag, error, trace SHA-256, duration, and backend details (e.g. the SceneSmith prompt and validator result) |
 | `results` | Verdict and reasons, failure-probability estimate, per-spec estimates, coverage, run and error counts |
 | `integrity` | `body_sha256` over everything above, and an optional `signature` |
+
+Every string in a report is passed through the secrets redactor before the digest is
+computed, so an API key that appears in an error message or a config can never be written
+to a report. Credentials appear only as fingerprints; see
+[credentials](secrets.md#fingerprints-in-reports).
 
 ## Integrity
 
@@ -27,10 +32,10 @@ reports/home_robot_tuned.report.json: digest OK, signature not checked; verdict 
 
 A digest proves a report was not changed by accident; a signature shows who produced it.
 
-**HMAC-SHA256** (built in): a shared secret signs and verifies.
+**HMAC-SHA256** (built in): a shared secret signs and verifies. It is read like any other
+[secret](secrets.md): environment variable or secrets file.
 
 ```console
-$ export VERDY_SIGNING_KEY='...'
 $ verdy run run.yaml --sign hmac
 $ verdy verify reports/x.report.json --key-env VERDY_SIGNING_KEY
 ```

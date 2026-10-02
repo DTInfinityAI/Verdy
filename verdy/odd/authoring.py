@@ -4,18 +4,17 @@ Turns a plain-language description of operating conditions into a draft ODD. Eve
 parameter the model proposes is marked ``provenance.source = "llm"`` and
 ``approved = false``, so a human must review it before strict validation passes.
 
-Requires the optional dependency: ``pip install "verdy[llm]"``.
+Requires the optional dependency: ``pip install "verdy[llm]"``. The API key comes from
+the ``ANTHROPIC_API_KEY`` secret (see :mod:`verdy.secrets`).
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
+from verdy.llm import DEFAULT_MODEL, LLMError, claude_client, create_json
 from verdy.odd.model import CATEGORIES, ODD, TYPES
 from verdy.odd.validation import ODDValidationError, check_odd
 from verdy.spec import ODD_SPEC_VERSION
-
-DEFAULT_MODEL = "claude-opus-5-5"
 
 SYSTEM_PROMPT = """\
 You help robotics engineers write an Operational Design Domain (ODD) for testing a robot \
@@ -126,11 +125,7 @@ def draft_odd(
     model for correction, up to ``max_attempts`` requests in total.
     """
     if client is None:
-        try:
-            import anthropic
-        except ImportError as exc:
-            raise ImportError('LLM authoring needs: pip install "verdy[llm]"') from exc
-        client = anthropic.Anthropic()
+        client = claude_client()
 
     messages: list[dict[str, Any]] = [
         {
@@ -140,24 +135,14 @@ def draft_odd(
     ]
     last_errors: list[str] = []
     for _ in range(max_attempts):
-        response = client.beta.messages.create(
-            model=model,
-            max_tokens=16000,
-            system=SYSTEM_PROMPT,
-            messages=messages,
-            output_config={
-                "effort": effort,
-                "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA},
-            },
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
-        if response.stop_reason == "refusal":
-            raise AuthoringError("the model declined to draft this ODD")
-        if response.stop_reason == "max_tokens":
-            raise AuthoringError("the draft was cut off; shorten the description")
-        text = next(b.text for b in response.content if b.type == "text")
-        doc = _to_odd_document(json.loads(text), version)
+        try:
+            draft, response = create_json(
+                client, system=SYSTEM_PROMPT, messages=messages, schema=OUTPUT_SCHEMA,
+                model=model, effort=effort,
+            )
+        except LLMError as exc:
+            raise AuthoringError(f"cannot draft this ODD: {exc}") from exc
+        doc = _to_odd_document(draft, version)
         report = check_odd(doc)
         if report.ok:
             return ODD.from_dict(doc)

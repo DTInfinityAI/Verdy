@@ -50,6 +50,18 @@ class Backend(ABC):
     def close(self) -> None:
         """Release simulator resources. Called once after the last rollout."""
 
+    def config(self) -> dict[str, Any]:
+        """Backend settings recorded in the evidence report."""
+        return {}
+
+    def describe(self, env: object) -> dict[str, Any]:
+        """Per-run details recorded in the report (e.g. a generated scene's prompt)."""
+        return {}
+
+    def secret_names(self) -> list[str]:
+        """Names of the secrets this backend uses; reports record their fingerprints."""
+        return []
+
 
 def validate_trace(trace: dict[str, Any], required: set[str] | None = None) -> dict[str, list]:
     """Check a trace is well formed and return it with plain float lists."""

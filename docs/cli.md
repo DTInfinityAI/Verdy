@@ -11,7 +11,9 @@ $ verdy --help
 | `verdy run CONFIG` | Run an evaluation and write the evidence report. |
 | `verdy verify REPORT [--key-env VAR \| --public-key PEM]` | Check a report's digest, and its signature if a key is given. |
 | `verdy plan --max-failure-prob P [--confidence C]` | Number of failure-free runs needed to show failure probability ≤ P. |
-| `verdy author "DESCRIPTION" [-o odd.draft.yaml]` | Draft an ODD with Claude (`pip install "verdy[llm]"`, needs Anthropic API credentials). |
+| `verdy author "DESCRIPTION" [-o odd.draft.yaml]` | Draft an ODD with Claude (`pip install "verdy[llm]"`, uses the `ANTHROPIC_API_KEY` secret). |
+| `verdy secrets status [NAME...] [--fingerprint sha256\|hmac\|none]` | Which secrets are set and where from, with fingerprints. Never prints values. |
+| `verdy secrets scan PATH...` | Find credential-shaped strings in files; exits 1 if any are found. |
 | `verdy schema {odd,stl_specs}` | Print a bundled JSON Schema. |
 
 ## `verdy run`
@@ -23,7 +25,7 @@ $ verdy --help
 | `--max-failure-prob P` | Override `verdict.max_failure_prob`. |
 | `-o, --output PATH` | Report path (default: the config's `output`). |
 | `--traces` | Save traces of failed runs next to the report. |
-| `--sign {hmac,ed25519}` | Sign the report. HMAC reads the secret from `--key-env` (default `VERDY_SIGNING_KEY`); Ed25519 needs `--key PEM`. |
+| `--sign {hmac,ed25519}` | Sign the report. HMAC reads the secret named by `--key-env` (default `VERDY_SIGNING_KEY`) from the environment or the secrets file; Ed25519 needs `--key PEM`. |
 | `-q, --quiet` | No progress output. |
 
 ## Exit codes
@@ -66,4 +68,9 @@ seed: 7
 verdict: {max_failure_prob: 0.05, confidence: 0.95, min_coverage: 0.9}
 keep_traces: failures                # false | true | failures
 output: reports/home_robot_tuned.report.json
+credentials:
+  fingerprint: sha256                # sha256 | hmac | none
 ```
+
+Configs name secrets but never contain them: a config with a credential-shaped value is
+rejected. See [credentials](secrets.md).
