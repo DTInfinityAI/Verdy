@@ -1,5 +1,7 @@
 # Baseline: the navigator with its default tuning. Expected verdict: FAIL.
 name: home_robot_baseline
+policy_name: home-navigator
+policy_version: 1.0.0
 odd: odd.yaml
 specs: specs.yaml
 policy:

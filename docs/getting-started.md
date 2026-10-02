@@ -16,6 +16,7 @@ pip install -e .                   # add [llm], [sign] or [dev] for the extras
 | --- | --- |
 | `llm` | Claude features: `verdy author` and SceneSmith scene prompts (`anthropic`) |
 | `sign` | Ed25519 report signatures (`cryptography`) |
+| `store` | Evidence store and history: Parquet traces, DuckDB index (`duckdb`, `pyarrow`) |
 | `dev` | `pytest` and `ruff` |
 
 ## Run the example

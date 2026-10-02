@@ -62,4 +62,6 @@ and roll it out again; its trace should hash to the recorded `trace_sha256`. Dur
 `created_at` naturally differ between runs.
 
 `verdy run --traces` (or `keep_traces: failures` in the config) also saves the full trace
-of every failed run next to the report, for debugging.
+of every failed run next to the report, for debugging. `verdy run --store` keeps every
+run's trace as Parquet at its `trace_sha256` and indexes the report; see
+[evidence store](evidence-store.md).

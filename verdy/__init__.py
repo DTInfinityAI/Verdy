@@ -4,7 +4,7 @@ Describe operating conditions as an ODD, sample scenarios from it, run a policy 
 backend, score every run against STL safety specs, and get a PASS / FAIL / INCONCLUSIVE
 verdict with confidence bounds and a reproducible evidence report.
 """
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from verdy.harness import EvaluationResult, RunRecord, evaluate  # noqa: E402
 from verdy.metrics import STLSpec, load_specs  # noqa: E402

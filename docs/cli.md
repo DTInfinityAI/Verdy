@@ -13,6 +13,9 @@ $ verdy --help
 | `verdy plan --max-failure-prob P [--confidence C]` | Number of failure-free runs needed to show failure probability ≤ P. |
 | `verdy author "DESCRIPTION" [-o odd.draft.yaml]` | Draft an ODD with Claude (`pip install "verdy[llm]"`, uses the `ANTHROPIC_API_KEY` secret). |
 | `verdy improve LOOP_CONFIG [--cycles N] [--sign hmac\|ed25519]` | Run the closed improvement loop: diagnose, collect feedback, train, re-certify on held-out scenarios. Exits with the final certified verdict. See [improvement loop](improvement-loop.md). |
+| `verdy index [PATHS...] [--rebuild] [--store PATH]` | Index evidence reports (default: every `*.report.json` under `.`) into the store. `--rebuild` regenerates the index from all known reports. |
+| `verdy history [POLICY] [--by-spec] [--json] [--fail-on-regression]` | Verdicts of a policy across versions, grouped by test suite, with regressions flagged. Without a policy, lists indexed policies. See [evidence store](evidence-store.md). |
+| `verdy query "SQL" [--json]` | Run a read-only SQL query on the evidence index. |
 | `verdy secrets status [NAME...] [--fingerprint sha256\|hmac\|none]` | Which secrets are set and where from, with fingerprints. Never prints values. |
 | `verdy secrets scan PATH...` | Find credential-shaped strings in files; exits 1 if any are found. |
 | `verdy schema {odd,stl_specs}` | Print a bundled JSON Schema. |
@@ -27,6 +30,8 @@ $ verdy --help
 | `-o, --output PATH` | Report path (default: the config's `output`). |
 | `--traces` | Save traces of failed runs next to the report. |
 | `--sign {hmac,ed25519}` | Sign the report. HMAC reads the secret named by `--key-env` (default `VERDY_SIGNING_KEY`) from the environment or the secrets file; Ed25519 needs `--key PEM`. |
+| `--store [PATH]` | Save every run's trace as Parquet in the store (default `.verdy/store`) and index the report. Needs `pip install "verdy[store]"`. |
+| `--policy-name NAME`, `--policy-version VERSION` | Policy identity for `verdy history` (override `policy_name` / `policy_version` in the config). |
 | `-q, --quiet` | No progress output. |
 
 ## Exit codes
@@ -71,6 +76,9 @@ keep_traces: failures                # false | true | failures
 output: reports/home_robot_tuned.report.json
 credentials:
   fingerprint: sha256                # sha256 | hmac | none
+policy_name: home-navigator          # identity for verdy history
+policy_version: 1.1.0
+store: .verdy/store                  # optional; same as --store
 ```
 
 Configs name secrets but never contain them: a config with a credential-shaped value is

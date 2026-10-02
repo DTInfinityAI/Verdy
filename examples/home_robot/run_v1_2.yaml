@@ -1,0 +1,24 @@
+# Release 1.2.0: a "faster for throughput" retune of 1.1.0. Same tests.
+# Expected: a regression from 1.1.0 (PASS -> INCONCLUSIVE). Used by the history demo:
+#   verdy run run_v1_2.yaml --store && verdy history home-navigator
+name: home_robot_v1_2
+policy_name: home-navigator
+policy_version: 1.2.0
+odd: odd.yaml
+specs: specs.yaml
+policy:
+  factory: policy:make_policy
+  args: {cruise: 1.1, slow_radius: 2.0, stop_radius: 0.7, memory: 0.6}
+backend:
+  type: sim2d
+  options: {dt: 0.1, horizon: 20.0}
+sampler: stratified
+runs: 1000
+seed: 7
+verdict:
+  max_failure_prob: 0.05
+  confidence: 0.95
+  min_coverage: 0.9
+  fail_on: [critical, major]
+keep_traces: failures
+output: reports/home_robot_v1_2.report.json

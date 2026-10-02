@@ -11,6 +11,7 @@ test question: **is this navigation policy safe enough to deploy?**
 | `run.yaml` | Baseline tuning, 1000 stratified scenarios, target ≤ 5% failures |
 | `run_tuned.yaml` | Same tests, conservative tuning |
 | `run_collisions.yaml` | Collisions only, target ≤ 1%, with importance sampling |
+| `run_v1_2.yaml` | Release 1.2.0, a "faster" retune that regresses: for `verdy history` |
 | `improve.yaml` | Improvement loop: take the baseline from `FAIL` to a certified `PASS` |
 | `simulated_operator.py` | Stand-in operator: expert driving style and pairwise preferences |
 | `demos/operator.jsonl`, `make_demos.py` | Recorded "operator" sessions, and the script that records them |
@@ -46,6 +47,18 @@ verdy run run_collisions.yaml
 
 Failed runs' traces are saved to `reports/<name>_traces/` for debugging. Change the
 tuning in `run.yaml`, or edit `policy.py`, and run again to compare.
+
+## Track releases
+
+```bash
+pip install -e "../..[store]"
+verdy run run.yaml --store && verdy run run_tuned.yaml --store && verdy run run_v1_2.yaml --store
+verdy history home-navigator --by-spec
+```
+
+The configs declare `policy_name: home-navigator` and versions 1.0.0, 1.1.0 and 1.2.0.
+History shows 1.0.0 `FAIL` → 1.1.0 `PASS` → 1.2.0 `INCONCLUSIVE`, and flags 1.2.0 as a
+regression. See [docs/evidence-store.md](../../docs/evidence-store.md).
 
 ## Improve it automatically
 
