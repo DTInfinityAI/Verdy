@@ -1,0 +1,44 @@
+# Closed-loop improvement of the baseline navigator (run.yaml):
+# test -> find weaknesses -> train on them -> re-certify on held-out scenarios.
+#
+# The "operator" here is simulated (simulated_operator.py) so the demo runs anywhere.
+# With real operators, use the file labeler below instead and record real sessions.
+name: home_robot_improve
+evaluation: run.yaml                  # ODD, specs, simulator and verdict rule
+
+policy:                               # trainable version of the baseline policy
+  factory: policy:make_policy
+  params: {cruise: 1.0, slow_radius: 1.5, stop_radius: 0.6, memory: 0.3}
+
+cycles: 3
+diagnose: {runs: 300, sampler: stratified, seed: 100}     # where is it weak?
+certify:  {runs: 1000, sampler: stratified, seed: 9000}   # held out: never trained on
+
+reward:
+  safety: {weight: 1.0, margin: 0.3, violation_penalty: 3.0, weights: {minor: 0.6}}
+  #   margins pay up to 0.3; violations cost a lot; reaching the goal still matters
+  preference: {weight: 0.3}           # learned from operator comparisons (bounded)
+
+feedback:
+  labeler: {type: scripted, function: simulated_operator:prefers_smooth_and_safe,
+            name: simulated-operator}
+  # Real operators: {type: file, directory: feedback}  (see docs/improvement-loop.md)
+  pairs_per_cycle: 30
+
+curriculum: {focus: 0.7, scenarios: 120}   # 70% of practice near observed failures
+
+demonstrations: [demos/operator.jsonl]     # expert sessions: a strong starting point
+
+trainer:
+  type: parameter_search
+  options:
+    bounds: {cruise: [0.5, 1.2], slow_radius: [0.8, 3.5], stop_radius: [0.3, 1.5],
+             memory: [0.0, 1.5]}
+    iterations: 3
+    population: 10
+    seed: 1
+
+promote: no_worse                     # candidate must do at least as well on held-out runs
+guard: {reach_goal: 0.01}             # ...and may not lose task completion to buy safety
+seed: 11
+output: reports/improve

@@ -1,6 +1,7 @@
 """Command-line interface.
 
-Exit codes for ``verdy run``: 0 PASS, 1 FAIL, 3 INCONCLUSIVE. Every command exits with 2
+Exit codes for ``verdy run`` and ``verdy improve`` (final certified verdict): 0 PASS,
+1 FAIL, 3 INCONCLUSIVE. Every command exits with 2
 on invalid input.
 """
 from __future__ import annotations
@@ -134,6 +135,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     return EXIT_CODES[result.status]
 
 
+def cmd_improve(args: argparse.Namespace) -> int:
+    from verdy.improve.config import load_loop_config
+    from verdy.ledger import sign_report, write_report
+
+    cfg = load_loop_config(args.config, cycles=args.cycles)
+    if not args.quiet:
+        cfg.loop.progress = lambda msg: print(f"  {msg}", file=sys.stderr, flush=True)
+    result = cfg.loop.run(cfg.cycles)
+    if args.sign:
+        sign_report(result.report, "hmac-sha256" if args.sign == "hmac" else "ed25519",
+                    _signing_key(args))
+        write_report(result.report, result.report_path)
+    print(result.summary())
+    return EXIT_CODES[result.final.status]
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     from verdy.ledger import IntegrityError, SignatureError, read_report, verify_report
 
@@ -250,6 +267,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--key", help="Ed25519 private key PEM")
     p.add_argument("-q", "--quiet", action="store_true")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("improve", help="run the closed improvement loop from a loop config")
+    p.add_argument("config")
+    p.add_argument("--cycles", type=int, help="override the number of cycles")
+    p.add_argument("--sign", choices=["hmac", "ed25519"], help="sign the loop report")
+    p.add_argument("--key-env", default="VERDY_SIGNING_KEY",
+                   help="secret holding the HMAC key (default VERDY_SIGNING_KEY)")
+    p.add_argument("--key", help="Ed25519 private key PEM")
+    p.add_argument("-q", "--quiet", action="store_true")
+    p.set_defaults(func=cmd_improve)
 
     p = sub.add_parser("verify", help="check a report's digest and signature")
     p.add_argument("report")

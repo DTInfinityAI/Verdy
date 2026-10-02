@@ -4,6 +4,29 @@ All notable changes to Verdy are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-02
+
+### Added
+
+- Improvement loop (`verdy improve`, `verdy.improve`): diagnose, collect feedback, build
+  a failure-focused curriculum, train, and re-certify candidate and incumbent on fresh
+  held-out scenarios, promoting only when the candidate is no worse (with optional
+  no-regression guards on specs such as task completion). Writes a sealed loop report
+  linking every evidence report.
+- Safety-margin reward from STL robustness, and a bounded preference reward.
+- Human feedback: pair selection, file, CLI and scripted labelers, and a Bradley-Terry
+  reward model over run features.
+- Expert demonstrations: recording and loading, and behavior-cloning pretraining.
+- Plug-in trainers: built-in parameter search, an external-command trainer that exports
+  each cycle's data for any RL/RLHF framework, or any Python class.
+- `FixedScenarioSampler`.
+- Home-robot improvement example with a simulated operator and recorded sessions.
+- README: SceneSmith setup steps and the improvement loop.
+
+### Changed
+
+- Modules loaded from run configs can import modules next to them.
+
 ## [0.2.0] - 2026-10-02
 
 ### Added

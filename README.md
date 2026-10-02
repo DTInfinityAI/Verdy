@@ -16,6 +16,11 @@ Describe your operating conditions, and Verdy:
 3. **Scores every run** against formal safety specifications
 4. **Returns a verdict** of `PASS`, `FAIL`, or `INCONCLUSIVE`, with confidence bounds and a reproducible evidence trail
 
+Then it helps make the policy better. The [improvement loop](#improvement-loop) turns
+every test into training signal: safety margins as rewards, targeted practice where the
+policy is weakest, human feedback (RLHF), and expert demonstrations. Each improved policy
+is re-certified on scenarios it never trained on, so improvement is proven, not assumed.
+
 ---
 
 ## Table of contents
@@ -25,6 +30,8 @@ Describe your operating conditions, and Verdy:
 - [Example](#example)
 - [Key features](#key-features)
 - [Verdicts](#verdicts)
+- [Improvement loop](#improvement-loop)
+- [SceneSmith setup](#scenesmith-setup)
 - [Command line](#command-line)
 - [API keys](#api-keys)
 - [Documentation](#documentation)
@@ -133,6 +140,8 @@ Report digest: 0acc9e2b...
 | **Statistical verdicts** | Exact Clopper-Pearson bounds (weighted bounds for importance sampling), per-spec estimates, and per-parameter and pairwise coverage reports. |
 | **Evidence ledger** | Every input, run and result in one report with a SHA-256 digest; HMAC or Ed25519 signatures. |
 | **Runtime monitors** | The same specs, evaluated online on the robot with past-time STL. |
+| **Improvement loop** | Test, find weaknesses, train on them, re-certify. Plug in any RL or RLHF trainer: a Python class or an external command. |
+| **Human feedback (RLHF)** | Operators compare pairs of runs; a reward model learns what they value. Expert sessions pretrain the policy. |
 | **Safe credentials** | API keys come from environment variables or a private secrets file, never configs. Reports store only hashed fingerprints, and logs, errors and reports are redacted. Subprocesses get only the keys they need. |
 
 ---
@@ -152,6 +161,139 @@ Details, assumptions and limits: [docs/verdicts.md](docs/verdicts.md).
 
 ---
 
+## Improvement loop
+
+Every Verdy test shows where a policy is fragile, by how much it nearly failed, and under
+which conditions. `verdy improve` turns that into a closed loop: **test, find
+weaknesses, train on them, re-certify.**
+
+```
+ diagnose ─▶ rewards + human feedback ─▶ failure map + curriculum ─▶ train ─▶ re-certify ─┐
+    ▲             (RLHF)                    (targeted practice)                (held out)   │
+    └──────────────────────── promote only if proven no worse ◀─────────────────────────────┘
+```
+
+| What it does | How |
+| --- | --- |
+| **Safety margins as rewards** | STL robustness becomes a reward that keeps paying until a run clears each spec by a margin, so the policy learns to keep its distance from failure instead of scraping a pass. |
+| **Targeted practice** | A failure map shows which conditions fail most, and a curriculum draws most training scenarios near observed failures. |
+| **Human feedback (RLHF)** | Operators compare pairs of runs and pick the better one (smoother, safer, more like an expert). A Bradley-Terry reward model learns what they value, bounded so it can never outweigh safety. |
+| **Learning from experts** | Recorded operator sessions pretrain the policy (behavior cloning) before feedback-driven training. |
+| **Proven, not assumed** | Every candidate and the current policy are certified on fresh scenarios from a separate seed stream that training never sees. The candidate is promoted only if it is no worse and does not regress guarded specs, such as task completion. |
+
+Every part is **plug and play**:
+
+| Module | Built in | Bring your own |
+| --- | --- | --- |
+| Trainer (the RL/RLHF algorithm) | `parameter_search` (cross-entropy search, with behavior-cloning pretraining) | Any Python class with `train(policy, data, ctx)`, or **any external command** (TRL, Stable-Baselines3, LeRobot, a GPU job) that reads Verdy's exported data |
+| Feedback source | `file` (operators label `pending.jsonl`), `cli`, `scripted` | Any class with `label(pairs)` (a web app, a labeling service) |
+| Reward model | Bradley-Terry over run features | Any class with `fit`, `predict` |
+| Curriculum | Failure-focused cross-entropy sampler | Any class with `fit`, `sample` |
+
+```bash
+cd examples/home_robot
+verdy improve improve.yaml
+```
+
+```text
+Starting policy: FAIL  p_fail=0.114 [0.09783, 0.1319]
+After pretraining on demonstrations: INCONCLUSIVE  p_fail=0.062 [0.04993, 0.07603]
+Cycle 1: candidate INCONCLUSIVE  p_fail=0.043 ... -> promoted (failure probability on held-out scenarios is no worse)
+Cycle 2: candidate PASS  p_fail=0.029 ... -> kept incumbent (reach_goal regressed from 0.001 to 0.013 (tolerance 0.01))
+Cycle 3: candidate PASS  p_fail=0.011 ... -> promoted (verdict improved to PASS)
+Final certified policy: PASS  p_fail=0.011 (upper 0.01814)
+  per-spec violation rates: no_collision 0.003, slow_near_person 0.01, reach_goal 0.007
+```
+
+The demo's operator is simulated so it runs anywhere. With real operators, switch to
+the file labeler and record real sessions. The full guide is
+[docs/improvement-loop.md](docs/improvement-loop.md).
+
+---
+
+## SceneSmith setup
+
+[SceneSmith](https://github.com/nepfaff/scenesmith) generates simulation-ready indoor
+scenes (Drake model directives) from text prompts. Verdy can generate a scene for every
+sampled scenario, run your policy in it, and have SceneSmith's validator judge the task.
+
+**1. Install SceneSmith** (Linux with an NVIDIA GPU; SceneSmith pins Python 3.11 and its
+own dependencies, separate from Verdy's):
+
+```bash
+git clone https://github.com/nepfaff/scenesmith ~/scenesmith
+cd ~/scenesmith
+curl -LsSf https://astral.sh/uv/install.sh | sh     # if uv is not installed
+uv sync                                             # creates ~/scenesmith/.venv
+sudo apt-get install bubblewrap                     # for SceneSmith's multi-GPU rendering
+```
+
+Follow SceneSmith's README for its asset and retrieval servers, and check it works on
+its own first: `.venv/bin/python main.py +name=smoke_test`.
+
+**2. Install Verdy with Claude support** (in Verdy's own environment):
+
+```bash
+cd ~/Verdy && pip install -e ".[llm]"
+```
+
+**3. Set your API keys** as environment variables, or in a private secrets file. Never put
+them in a config file; Verdy rejects configs that contain keys.
+
+```bash
+mkdir -p ~/.config/verdy
+$EDITOR ~/.config/verdy/secrets.env      # OPENAI_API_KEY=...  ANTHROPIC_API_KEY=...
+chmod 600 ~/.config/verdy/secrets.env
+verdy secrets status                     # shows which keys are set, as fingerprints only
+```
+
+| Secret | Why |
+| --- | --- |
+| `OPENAI_API_KEY` | SceneSmith's own agents (scene generation and task validation) use OpenAI |
+| `ANTHROPIC_API_KEY` | Claude writes a scene prompt for each scenario |
+| `GOOGLE_API_KEY` | Optional: SceneSmith's Gemini image backend |
+| `VERDY_FINGERPRINT_KEY` | Optional: keyed (`hmac`) key fingerprints in reports |
+
+**4. Point Verdy at SceneSmith**, in the run config (or `export SCENESMITH_DIR=~/scenesmith`):
+
+```yaml
+backend:
+  type: scenesmith
+  options:
+    task: Find the target object and place it on the main table or desk in the room.
+    scenesmith_dir: ~/scenesmith
+    prompt: {writer: claude}               # or {writer: template, template: "A {room_type} ..."}
+    secrets: [OPENAI_API_KEY]              # names only
+    extra_env: {WANDB_MODE: disabled}
+```
+
+**5. Wrap your robot policy.** It receives the generated scene and writes the final scene
+with objects where the robot left them (SceneSmith's robot-evaluation contract):
+
+```python
+class MyRobotPolicy:
+    def run(self, scene, output_dmd, seed):
+        # scene.dmd: initial .dmd.yaml   scene.state: object metadata   scene.task: the task
+        final_poses = run_robot_in_drake(scene, seed)
+        write_dmd_with_poses(scene.dmd, final_poses, output_dmd)
+```
+
+**6. Run it:**
+
+```bash
+cd examples/scenesmith
+verdy validate odd.yaml specs.yaml
+verdy run run.yaml                       # starts with the DoNothingPolicy baseline
+```
+
+Each scene takes minutes to generate, so start with a few runs. Scenes are cached in
+`.verdy/scenesmith/` and reused on reruns. Logs there are redacted of keys. For details
+(prompt writers, signals, options, costs) see
+[docs/backends.md](docs/backends.md#scenesmith). The integration is tested against a
+stand-in SceneSmith checkout; report anything that differs on a real installation.
+
+---
+
 ## Command line
 
 | Command | Purpose |
@@ -162,12 +304,13 @@ Details, assumptions and limits: [docs/verdicts.md](docs/verdicts.md).
 | `verdy verify report.json` | Check a report's digest and signature |
 | `verdy plan --max-failure-prob 0.01` | Runs needed to demonstrate a target |
 | `verdy author "description"` | Draft an ODD with Claude |
+| `verdy improve improve.yaml` | Run the closed improvement loop: test, train, re-certify |
 | `verdy secrets status` | Which API keys are set, as fingerprints (never values) |
 | `verdy secrets scan .` | Check files for committed credentials |
 | `verdy schema odd` | Print the ODD JSON Schema |
 
-`verdy run` exits with 0 for `PASS`, 1 for `FAIL` and 3 for `INCONCLUSIVE`, so it can gate
-a CI pipeline. See [docs/cli.md](docs/cli.md).
+`verdy run` (and `verdy improve`, for the final certified policy) exits with 0 for `PASS`,
+1 for `FAIL` and 3 for `INCONCLUSIVE`, so it can gate a CI or training pipeline. See [docs/cli.md](docs/cli.md).
 
 ---
 
@@ -202,6 +345,7 @@ and everything Verdy prints, logs or stores is redacted. Details:
 | [Verdicts and statistics](docs/verdicts.md) | The decision rule, bounds and coverage |
 | [Evidence ledger](docs/evidence-ledger.md) | Reports, digests, signatures, reproducibility |
 | [Runtime monitors](docs/runtime-monitors.md) | Running specs on the robot |
+| [Improvement loop](docs/improvement-loop.md) | Rewards, RLHF, demonstrations, trainers, re-certification |
 | [Credentials and API keys](docs/secrets.md) | Setting keys safely, fingerprints, leak scanning |
 | [Command-line reference](docs/cli.md) | Commands, options, exit codes, run configs |
 
@@ -221,13 +365,14 @@ Verdy/
 │   ├── monitor/              # Runtime monitors
 │   ├── verdict/              # Statistics, coverage, decision rule
 │   ├── ledger/               # Hashing, evidence reports, signatures
+│   ├── improve/              # Improvement loop: rewards, RLHF, curriculum, trainers
 │   ├── secrets.py            # API keys: lookup, fingerprints, redaction
 │   ├── llm.py                # Claude client (key from secrets)
 │   ├── harness.py            # The evaluation pipeline
 │   ├── config.py             # Run-config loading
 │   └── cli.py                # The `verdy` command
 ├── examples/
-│   ├── home_robot/           # Full evaluation on the built-in simulator
+│   ├── home_robot/           # Full evaluation and improvement loop on the built-in simulator
 │   ├── log_replay/           # Scoring recorded runs
 │   └── scenesmith/           # Pick and place on SceneSmith-generated homes
 ├── docs/                     # Guides and the ODD specification
@@ -238,7 +383,7 @@ Verdy/
 
 ## Project status
 
-Verdy `0.2.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
+Verdy `0.3.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
 formats may change before `1.0`. Known limitations:
 
 - The built-in simulator is a teaching and testing tool. Results from it say nothing about
@@ -247,6 +392,8 @@ formats may change before `1.0`. Known limitations:
   as well as your Claude key. The integration is tested against a stand-in SceneSmith
   checkout, not yet a full SceneSmith installation.
 - Importance-sampling bounds are approximate. See [docs/sampling.md](docs/sampling.md).
+- The improvement loop's built-in trainer tunes policy parameters; train neural policies
+  by plugging in your RL framework (command or Python trainer).
 - Python 3.13 is not supported until RTAMT's parser runtime supports it.
 
 Built by **DeepThought Infinity (DTI.ai)**. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
