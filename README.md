@@ -537,6 +537,20 @@ Verdy computes one-sided bounds `L` and `U` on the failure probability:
 | `FAIL` | `L > max_failure_prob` | Fails more often than allowed, with the stated confidence. |
 | `INCONCLUSIVE` | otherwise | Not enough evidence yet: run more scenarios or cover more of the ODD. |
 
+```mermaid
+flowchart TD
+    runs["Scored runs<br/>a run fails if a spec in fail_on is violated;<br/>crashed runs count as failures by default"] --> est["Failure-probability estimate<br/>one-sided bounds L and U at confidence"]
+    est --> enough{"At least<br/>min_runs runs?"}
+    enough -->|"no"| inc1["INCONCLUSIVE<br/>run more scenarios"]
+    enough -->|"yes"| failq{"L > max_failure_prob?"}
+    failq -->|"yes"| fail["FAIL<br/>fails more often than allowed"]
+    failq -->|"no"| passq{"U <= max_failure_prob?"}
+    passq -->|"no"| inc2["INCONCLUSIVE<br/>not enough evidence yet"]
+    passq -->|"yes"| covq{"ODD coverage >= min_coverage?"}
+    covq -->|"no"| inc3["INCONCLUSIVE<br/>cover more of the ODD"]
+    covq -->|"yes"| pass["PASS<br/>fails at most max_failure_prob of the time"]
+```
+
 Details, assumptions and limits: [docs/verdicts.md](docs/verdicts.md).
 
 ---
