@@ -13,6 +13,19 @@ satisfies the ODD [constraints](odd-spec.md#constraints).
 
 Preview scenarios with `verdy sample odd.yaml -n 10 --sampler stratified`.
 
+## Choosing a sampler
+
+```mermaid
+flowchart TD
+    start{"What do you need<br/>from the runs?"} -->|"conditions the robot actually met"| replay["Log replay<br/>type: replay<br/>one scenario per recorded log"]
+    start -->|"an even spread over the ODD<br/>on a small budget"| strat["Stratified, Latin hypercube<br/>type: stratified<br/>each quantile stratum used once"]
+    start -->|"an unbiased failure rate<br/>at the nominal mix"| mc["Monte Carlo<br/>type: monte_carlo<br/>independent nominal draws"]
+    start -->|"rare failures,<br/>e.g. a target of 1% or less"| imp["Importance sampling<br/>type: importance<br/>adapts towards near-failures, weights every run"]
+    replay & strat & mc --> exact["Exact Clopper-Pearson bounds"]
+    imp --> approx["Weighted, approximate bounds<br/>check effective_n"]
+    exact & approx --> verdict{"Verdict"}
+```
+
 ## Monte Carlo
 
 Independent draws from each parameter's nominal distribution, rejecting any that violate
@@ -34,6 +47,16 @@ come close to failing, and weights every run so the failure probability is still
 under the nominal ODD.
 
 How it works:
+
+```mermaid
+flowchart TD
+    nominal["Batch 1: nominal draws"] --> run["Run the batch, score robustness"]
+    run --> elite["Elite runs<br/>lowest robustness (elite_fraction) and every failure"]
+    elite --> refit["Refit the proposal<br/>truncated normal over quantiles; re-weighted categories;<br/>smoothing, min_sigma, min_prob"]
+    refit --> mix["Next batch from the defensive mixture<br/>λ·nominal + (1 − λ)·proposal"]
+    mix -->|"weight = nominal / mixture ≤ 1/λ"| run
+    run -->|"after the last batch"| estimate["Self-normalized weighted failure rate<br/>bounds at the effective sample size"]
+```
 
 1. The first batch is drawn from the nominal distribution.
 2. After each batch, the lowest-robustness runs (`elite_fraction`, and always every

@@ -31,6 +31,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [Key features](#key-features)
 - [Drafting an ODD](#drafting-an-odd)
   - [Training Laya on your approvals](#training-laya-on-your-approvals)
+- [Scenario sampling](#scenario-sampling)
 - [Verdicts](#verdicts)
 - [Runtime monitors](#runtime-monitors)
 - [Improvement loop](#improvement-loop)
@@ -523,6 +524,33 @@ log everything, and switch to `laya-tree` once it beats the LLM on held-out appr
 
 The full walkthrough covers hardware, the training script, the promotion rules and
 scheduling: [docs/laya-finetuning.md](docs/laya-finetuning.md).
+
+---
+
+## Scenario sampling
+
+A sampler turns the ODD into concrete scenarios. Every sampler is deterministic given its
+seed, and every scenario satisfies the ODD's constraints. Pick one by what you need from
+the runs:
+
+```mermaid
+flowchart TD
+    start{"What do you need<br/>from the runs?"} -->|"conditions the robot actually met"| replay["Log replay<br/>type: replay<br/>one scenario per recorded log"]
+    start -->|"an even spread over the ODD<br/>on a small budget"| strat["Stratified, Latin hypercube<br/>type: stratified<br/>each quantile stratum used once"]
+    start -->|"an unbiased failure rate<br/>at the nominal mix"| mc["Monte Carlo<br/>type: monte_carlo<br/>independent nominal draws"]
+    start -->|"rare failures,<br/>e.g. a target of 1% or less"| imp["Importance sampling<br/>type: importance<br/>adapts towards near-failures, weights every run"]
+    replay & strat & mc --> exact["Exact Clopper-Pearson bounds"]
+    imp --> approx["Weighted, approximate bounds<br/>check effective_n"]
+    exact & approx --> verdict{"Verdict"}
+```
+
+```bash
+verdy sample odd.yaml -n 10 --sampler stratified     # preview scenarios
+```
+
+Importance sampling refits its proposal after every batch from the runs that came closest
+to failing, and weights each run so the failure rate is still estimated under the nominal
+ODD. Details: [docs/sampling.md](docs/sampling.md).
 
 ---
 
