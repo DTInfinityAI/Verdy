@@ -24,6 +24,22 @@ From the runs, Verdy computes a failure-probability estimate with a one-sided lo
 | `PASS` | `U ≤ max_failure_prob` and coverage ≥ `min_coverage` | The policy fails at most `max_failure_prob` of the time, with the stated confidence, and the tests covered enough of the ODD. |
 | `INCONCLUSIVE` | anything else | Not enough evidence yet: run more scenarios or cover more of the ODD. |
 
+The checks run in this order:
+
+```mermaid
+flowchart TD
+    runs["Scored runs<br/>a run fails if a spec in fail_on is violated;<br/>crashed runs count as failures by default"] --> est["Failure-probability estimate<br/>one-sided bounds L and U at confidence"]
+    est --> enough{"At least<br/>min_runs runs?"}
+    enough -->|"no"| inc1["INCONCLUSIVE<br/>run more scenarios"]
+    enough -->|"yes"| failq{"L > max_failure_prob?"}
+    failq -->|"yes"| fail["FAIL<br/>fails more often than allowed"]
+    failq -->|"no"| passq{"U <= max_failure_prob?"}
+    passq -->|"no"| inc2["INCONCLUSIVE<br/>not enough evidence yet"]
+    passq -->|"yes"| covq{"ODD coverage >= min_coverage?"}
+    covq -->|"no"| inc3["INCONCLUSIVE<br/>cover more of the ODD"]
+    covq -->|"yes"| pass["PASS<br/>fails at most max_failure_prob of the time"]
+```
+
 `PASS` and `FAIL` each have an error rate of at most `1 − confidence` when the runs are
 representative of the ODD's nominal distribution. One failed run does not mean `FAIL` on
 its own: the target is a *rate*, and the verdict says whether the rate is above or below

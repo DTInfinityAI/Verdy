@@ -32,6 +32,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [Drafting an ODD](#drafting-an-odd)
   - [Training Laya on your approvals](#training-laya-on-your-approvals)
 - [Verdicts](#verdicts)
+- [Runtime monitors](#runtime-monitors)
 - [Improvement loop](#improvement-loop)
 - [SceneSmith setup](#scenesmith-setup)
 - [Evidence store and history](#evidence-store-and-history)
@@ -536,7 +537,56 @@ Verdy computes one-sided bounds `L` and `U` on the failure probability:
 | `FAIL` | `L > max_failure_prob` | Fails more often than allowed, with the stated confidence. |
 | `INCONCLUSIVE` | otherwise | Not enough evidence yet: run more scenarios or cover more of the ODD. |
 
+```mermaid
+flowchart TD
+    runs["Scored runs<br/>a run fails if a spec in fail_on is violated;<br/>crashed runs count as failures by default"] --> est["Failure-probability estimate<br/>one-sided bounds L and U at confidence"]
+    est --> enough{"At least<br/>min_runs runs?"}
+    enough -->|"no"| inc1["INCONCLUSIVE<br/>run more scenarios"]
+    enough -->|"yes"| failq{"L > max_failure_prob?"}
+    failq -->|"yes"| fail["FAIL<br/>fails more often than allowed"]
+    failq -->|"no"| passq{"U <= max_failure_prob?"}
+    passq -->|"no"| inc2["INCONCLUSIVE<br/>not enough evidence yet"]
+    passq -->|"yes"| covq{"ODD coverage >= min_coverage?"}
+    covq -->|"no"| inc3["INCONCLUSIVE<br/>cover more of the ODD"]
+    covq -->|"yes"| pass["PASS<br/>fails at most max_failure_prob of the time"]
+```
+
 Details, assumptions and limits: [docs/verdicts.md](docs/verdicts.md).
+
+---
+
+## Runtime monitors
+
+The specs a policy is certified against also run on the robot, flagging violations as they
+happen:
+
+```mermaid
+flowchart LR
+    specs[("specs.yaml<br/>the specs the policy was tested against")] --> check{"Monitorable<br/>online?"}
+    check -->|"always(f) becomes historically(f)"| monitor["RuntimeMonitor<br/>past-time STL with RTAMT"]
+    check -->|"explicit monitor: formula"| monitor
+    check -->|"needs the future, e.g. reach the goal within 20 s"| skipped["Skipped and listed<br/>skip_unmonitorable=True"]
+    robot["Robot signals<br/>one sample every dt seconds"] -->|"monitor.update(sample)"| monitor
+    monitor --> status{"MonitorStatus<br/>robustness per spec"}
+    status -->|"ok: next sample"| robot
+    status -->|"violated, latched for the episode"| stop["Safe stop<br/>reason: status.violated"]
+```
+
+```python
+from verdy.metrics import load_specs
+from verdy.monitor import RuntimeMonitor
+
+monitor = RuntimeMonitor(load_specs("specs.yaml"), dt=0.1, skip_unmonitorable=True)
+for sample in robot_stream():                 # e.g. {"dist_obstacle": 0.8, "speed": 0.4}
+    status = monitor.update(sample)
+    if not status.ok:
+        robot.safe_stop(reason=status.violated)
+```
+
+A monitor can't see the future, so it uses past-time formulas: `always(...)` specs are
+converted to `historically(...)` automatically, other specs need an explicit `monitor`
+formula, and specs that need the future are skipped. A violation latches for the episode,
+so create a new monitor per episode. Guide: [docs/runtime-monitors.md](docs/runtime-monitors.md).
 
 ---
 
