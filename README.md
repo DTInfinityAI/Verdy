@@ -48,12 +48,18 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 
 ## How it works
 
-```
- ODD spec ──▶ Scenario sampler ──▶ Execution backend ──▶ STL scoring ──▶ Statistical verdict
- (odd/,        (sampler/)            (backends/)          (metrics/)      (verdict/)
-  spec/)                                                                       │
-                                                                               ▼
-                                                                  Evidence ledger (ledger/)
+```mermaid
+flowchart LR
+    desc["Plain-language description"] -->|"verdy author"| odd["ODD spec<br/>odd/, spec/"]
+    onto[("Parameter ontology<br/>tree")] -.->|"names, units, bounds"| odd
+    odd --> sampler["Scenario sampler<br/>sampler/"]
+    sampler --> backend["Execution backend<br/>backends/"]
+    backend --> stl["STL scoring<br/>metrics/"]
+    stl --> verdict{"Statistical verdict<br/>PASS / FAIL / INCONCLUSIVE"}
+    verdict --> ledger[("Evidence ledger<br/>signed report")]
+    ledger --> store[("Evidence store<br/>Parquet + DuckDB")]
+    verdict -.->|"failures"| improve["Improvement loop<br/>improve/"]
+    improve -.->|"re-certify"| sampler
 ```
 
 | Stage | What it does |
@@ -158,6 +164,25 @@ Report digest: 0acc9e2b...
 parameters and an embedder shortlists matching entries from the
 [parameter ontology](docs/ontology.md). A resolver picks the matching entry, and Claude
 writes only the parameters the ontology doesn't have yet.
+
+```mermaid
+flowchart TD
+    subgraph truth ["Single source of truth"]
+        onto[("Ontology tree<br/>versioned YAML")] -->|"verdy ontology render"| skill["SKILL.md +<br/>references/branch.md"]
+    end
+    desc["Plain-language description"] --> extract["1. Claude extracts candidates<br/>phrase, unit, range"]
+    skill -.-> extract
+    extract --> shortlist["2. Embedding shortlist<br/>top-k entries"]
+    shortlist --> resolve{"3. Resolver<br/>exact, laya, laya-tree, llm"}
+    resolve -->|"match + probability"| matched["Parameter from the ontology<br/>source: ontology"]
+    resolve -->|"none + placement"| misses["4. Claude drafts only the misses<br/>new_ontology_entry: true"]
+    matched --> draft["Draft ODD<br/>resolution recorded per parameter"]
+    misses --> draft
+    draft --> human{"5. Human approves"}
+    human -->|"verdy ontology add"| onto
+    human -->|"verdy ontology log"| log[("Approval log<br/>phrase to leaf")]
+    human --> run["verdy run<br/>evidence report embeds the ODD"]
+```
 
 ### One source of truth: the ontology tree
 
@@ -398,24 +423,90 @@ The base Laya checkpoints are a fast base to specialise, not a zero-shot decisio
 The walker earns its place once it is fine-tuned on your approval history. Start logging
 approvals today, whatever resolver you use:
 
-```bash
-# 1. Log every approved ODD as phrase -> leaf (also done by `verdy ontology add`)
-verdy ontology log odd.yaml --ontology my-ontology.yaml
-# 2. Optional: synthetic paraphrases, tagged and used for training only
-verdy ontology paraphrase -n 3
-# 3. One example per tree level, from the current tree; stable train / held-out split
-verdy laya dataset --ontology my-ontology.yaml -o laya_data
-# 4. Base checkpoint, then tokenize for Laya's fine-tuning script
-huggingface-cli download convaiinnovations/laya --local-dir laya_base
-verdy laya items laya_data/train.jsonl --model-dir laya_base -o laya_data/train_items.pt
-# 5. Train with Laya's own script (Apple Silicon / CPU; a Kaggle 2xT4 notebook also exists)
-python laya_finetune_typed_decisions_mps.py --model-dir laya_base \
-  --items laya_data/train_items.pt --output-dir laya_verdy --micro-batch 1 --grad-accum 32
-# 6. Promote only if per-level accuracy and calibration beat the current checkpoint
-verdy laya eval laya_data/heldout.jsonl --checkpoint ./laya_verdy --baseline english
-# 7. Retrain every few hundred new approvals
-verdy laya due --manifest laya_data/manifest.json --every 300
+```mermaid
+flowchart TD
+    approvals["Human approvals of drafted ODDs"] -->|"verdy ontology log"| log[("Approval log<br/>phrase to leaf")]
+    log <-->|"verdy ontology paraphrase"| syn["Synthetic paraphrases<br/>train only"]
+    log --> dataset["verdy laya dataset<br/>one example per tree level"]
+    tree[("Current ontology tree")] --> dataset
+    dataset --> train["train.jsonl"]
+    dataset --> held["heldout.jsonl<br/>human approvals only"]
+    train -->|"verdy laya items"| ft["Laya fine-tuning script<br/>RLCD + calibration"]
+    ft --> ckpt["Candidate checkpoint"]
+    ckpt --> gate{"verdy laya eval<br/>per-level accuracy + ECE vs current"}
+    held --> gate
+    gate -->|"PROMOTE"| walker["laya-tree resolver in verdy author"]
+    gate -->|"KEEP CURRENT"| current["Current checkpoint stays"]
+    walker -->|"new drafts"| approvals
 ```
+
+`verdy laya due` tells a scheduled job when enough new approvals have arrived to go round
+the loop again (every few hundred).
+
+#### Example: a first fine-tuning round
+
+A team has logged 310 human approvals and wants to know whether a fine-tuned walker beats
+the base checkpoint. (Illustrative output: counts and scores depend on your data.)
+
+```console
+# 1. Log each approved ODD (verdy ontology add also does this)
+$ verdy ontology log rov-inspection.yaml --ontology subsea.yaml
+Logged 6 new approvals to .verdy/ontology/approvals.jsonl (0 already logged)
+
+# 2. Optional: synthetic paraphrases ("poor vis", "silty"), used for training only
+$ verdy ontology paraphrase -n 3
+Added 412 synthetic paraphrases to .verdy/ontology/approvals.jsonl (tagged source: synthetic; held-out evaluation uses human approvals only)
+
+# 3. One example per tree level, from the current tree
+$ verdy laya dataset --ontology subsea.yaml -o laya_data --holdout 0.2
+Wrote laya_data: 1840 training rows, 402 held-out rows from 310 human and 412 synthetic approvals (subsea@0.3.0).
+
+# 4. Base checkpoint, then tokenize for Laya's fine-tuning script
+$ huggingface-cli download convaiinnovations/laya --local-dir laya_base
+$ verdy laya items laya_data/train.jsonl --model-dir laya_base -o laya_data/train_items.pt
+Wrote 1840 training items to laya_data/train_items.pt (0 skipped).
+
+# 5. Train with Laya's own script (Apple Silicon or CPU; Kaggle 2xT4 notebook for CUDA)
+$ python laya_finetune_typed_decisions_mps.py --model-dir laya_base \
+    --items laya_data/train_items.pt --output-dir laya_verdy \
+    --epochs 4 --micro-batch 1 --grad-accum 32
+Using legacy cached training items without metadata: laya_data/train_items.pt
+Device: mps
+Training items: 1656; calibration items: 184
+Epoch 1/4 complete; avg_loss=0.8123
+...
+Epoch 4/4 complete; avg_loss=0.2147
+Running temperature calibration ...
+Model saved to laya_verdy
+Temperatures: [1.08, 1.2, 1.2]
+
+# 6. Promote only if it beats the current checkpoint on held-out human approvals
+$ verdy laya eval laya_data/heldout.jsonl --checkpoint ./laya_verdy --baseline english \
+    -o laya_verdy.eval.json
+./laya_verdy: accuracy 0.912, ECE 0.031, Brier 0.071 (n=402)
+  level 1: accuracy 0.976, ECE 0.018 (n=124)
+  level 2: accuracy 0.927, ECE 0.029 (n=124)
+  level 3: accuracy 0.871, ECE 0.044 (n=104)
+  level 4: accuracy 0.78, ECE 0.051 (n=50)
+  match   accuracy 0.93 (n=348)
+  none    accuracy 0.796 (n=54)
+english: accuracy 0.41, ECE 0.22, Brier 0.48 (n=402)
+  ...
+PROMOTE ./laya_verdy vs english:
+  accuracy 0.410 -> 0.912
+  ECE 0.220 -> 0.031
+
+# 7. Use it, keep logging, and retrain when enough new approvals arrive
+$ cp -r laya_verdy laya_checkpoints/2026-10-03
+$ verdy author "$(cat rov-site-b.txt)" --ontology subsea.yaml --resolver laya-tree \
+    --resolver-option checkpoint=laya_checkpoints/2026-10-03 -o site-b.draft.yaml
+$ verdy laya due --manifest laya_data/manifest.json --every 300
+362 human approvals, 310 in the last dataset, 52 new: retraining is not due (every 300).
+```
+
+At the next round, compare against the promoted checkpoint rather than `english`:
+`--baseline laya_checkpoints/2026-10-03`. `verdy laya eval` exits 0 only on `PROMOTE`, so
+a scheduled job can chain the steps and promote automatically.
 
 How the data is built:
 - One approval gives one training example per level, with siblings as hard negatives.

@@ -6,6 +6,29 @@ checkpoints are a fast starting point to specialise, not a zero-shot decision en
 own benchmarks put them near chance on unfamiliar decisions until they are fine-tuned. This
 guide turns your approval history into a fine-tuned, calibrated, version-pinned resolver.
 
+## The loop
+
+```mermaid
+flowchart TD
+    approvals["Human approvals of drafted ODDs"] -->|"verdy ontology log"| log[("Approval log<br/>phrase to leaf")]
+    log <-->|"verdy ontology paraphrase"| syn["Synthetic paraphrases<br/>train only"]
+    log --> dataset["verdy laya dataset<br/>one example per tree level"]
+    tree[("Current ontology tree")] --> dataset
+    dataset --> train["train.jsonl"]
+    dataset --> held["heldout.jsonl<br/>human approvals only"]
+    train -->|"verdy laya items"| ft["Laya fine-tuning script<br/>RLCD + calibration"]
+    ft --> ckpt["Candidate checkpoint"]
+    ckpt --> gate{"verdy laya eval<br/>per-level accuracy + ECE vs current"}
+    held --> gate
+    gate -->|"PROMOTE"| walker["laya-tree resolver in verdy author"]
+    gate -->|"KEEP CURRENT"| current["Current checkpoint stays"]
+    walker -->|"new drafts"| approvals
+```
+
+Approvals feed the log, the log and the current tree produce per-level data, a candidate
+checkpoint is trained and evaluated against the current one, and only a promoted checkpoint
+reaches `verdy author`. Its resolutions are approved by humans in turn, which grows the log.
+
 ## Is it worth it?
 
 It depends on scale:
