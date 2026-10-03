@@ -4,6 +4,52 @@ All notable changes to Verdy are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.7.0] - 2026-10-03
+
+### Added
+
+- Tree-shaped ontology (ontology spec 0.2.0). Nodes have an id, a label, a one-line
+  definition, aliases, a parent and a status (`draft` or `approved`). Leaves are parameters
+  with units, bounds, a distribution and grounding. Roots are the ODD categories. The
+  bundled `core` ontology is now a tree of 31 parameters in 18 groups. Flat 0.6 ontologies
+  still load.
+- `verdy ontology validate` enforces at most 15 children per node (`max_children`), which
+  leaves room for "none" in Laya's option budget. CI runs it on the core ontology.
+- `verdy ontology regroup`: when a node has more than 15 children, Claude proposes
+  intermediate groups. Verdy validates the proposal and sends problems back for a retry
+  (taken ids, a child in two groups, groups of fewer than 2 or more than 15 children, still
+  over the limit). It then writes the groups as `status: draft`, with their members moved
+  under them, for a human to approve.
+- `verdy ontology render` generates an LLM skill from the ontology: `SKILL.md` (naming
+  conventions, units, distributions, grounding, branches, worked examples) and
+  `references/<branch>.md`. The rendered core skill is committed in
+  `skills/ontology-core/`, and CI fails if it is stale. `verdy author` sends `SKILL.md` with
+  extraction and only the touched branches' references with miss authoring, and records
+  `skill_sha256` in the ODD.
+- `laya-tree` resolver: Laya walks the tree level by level with a beam (keeps the
+  runner-up when close), the path probability is the product of its steps, and "none"
+  below a group becomes the new entry's placement (`resolution.path`,
+  `resolution.placement`, `provenance.ontology_parent`). Loads fine-tuned checkpoints from
+  a directory.
+- Approval log (`verdy ontology log`, also written by `verdy ontology add`): phrase → leaf
+  records with the resolver's original decision. New entries are logged as "none" at their
+  group, with a snapshot of the options shown at the time. `verdy ontology paraphrase` adds
+  synthetic paraphrases tagged `source: synthetic`.
+- Laya fine-tuning (`verdy.finetune`, see `docs/laya-finetuning.md`):
+  - `verdy laya dataset`: one example per tree level from the current tree, with a stable
+    train/held-out split, held-out data from human approvals only, and no paraphrase of a
+    held-out phrase in training.
+  - `verdy laya items`: tokenizes rows into the training-item format of Laya's fine-tuning
+    script.
+  - `verdy laya eval`: a promotion gate on per-level accuracy and calibration.
+  - `verdy laya due`: says when retraining is due.
+
+### Changed
+
+- ODD spec 0.4.0 (additive): `provenance.ontology_parent`, and `resolution.path`,
+  `resolution.placement` and `resolution.unit`.
+- Miss authoring places each new entry under an existing group.
+
 ## [0.6.0] - 2026-10-03
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://dti.ai/verdy/spec/odd/0.3.0",
+  "$id": "https://dti.ai/verdy/spec/odd/0.4.0",
   "title": "Verdy ODD",
   "description": "Operational Design Domain: the conditions a robot policy is expected to operate in.",
   "type": "object",
@@ -72,6 +72,10 @@
               "type": "boolean"
             },
             "also_mentioned_as": {"type": "array", "items": {"type": "string"}},
+            "ontology_parent": {
+              "description": "For a new_ontology_entry: the ontology group it belongs under.",
+              "type": "string"
+            },
             "resolution": {"$ref": "#/$defs/resolution"}
           }
         }
@@ -88,8 +92,19 @@
         "probability": {"type": "number", "minimum": 0, "maximum": 1},
         "candidate": {"description": "Name the extraction step proposed.", "type": "string"},
         "phrase": {"description": "Words in the description that mention it.", "type": "string"},
+        "unit": {"description": "Unit the description used, if any.", "type": "string"},
         "proposed": {"description": "Resolver's choice when it was rejected.", "type": "string"},
         "reason": {"type": "string"},
+        "path": {
+          "description": "Tree walk: the node chosen at each level with its probability.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["node", "p"],
+            "properties": {"node": {"type": "string"}, "p": {"type": "number"}}
+          }
+        },
+        "placement": {"description": "Group below which the resolver answered none.", "type": "string"},
         "ontology": {"description": "Ontology name@version.", "type": "string"},
         "embedder": {"type": "string"},
         "shortlist": {

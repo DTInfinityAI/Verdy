@@ -1,229 +1,520 @@
-# Verdy core parameter ontology. Canonical names, units and physical bounds for ODD
-# parameters that recur across robots and customers. Ranges are physical bounds; an ODD
-# narrows them to the conditions it covers.
+# Verdy core parameter ontology: a tree of canonical ODD parameters.
+# Roots are ODD categories; nodes with a `type` are parameters (leaves). Ranges are physical
+# bounds; an ODD narrows them. Keep every node at 15 children or fewer
+# (`verdy ontology validate`), and re-render the skill after editing
+# (`verdy ontology render core -o skills/ontology-core`).
 name: core
-version: 0.1.0
+version: 0.2.0
 description: Common operating-condition parameters for mobile, manipulation and marine robots.
-entries:
-  # --- environment: light and weather ---
-  - name: lighting
-    description: Ambient light at the robot's working height.
-    category: environment
-    type: continuous
-    unit: lux
-    range: [0.1, 100000]
-    distribution: loguniform
-    synonyms: [illumination, ambient light, brightness, light level, darkness, dim, dusk]
-    grounding: {sim: lighting_lux}
-  - name: glare
-    description: Direct sunlight or reflections shining into the cameras.
-    category: environment
-    type: boolean
-    distribution: bernoulli(0.1)
-    synonyms: [sun glare, low sun, reflections, specular highlights]
-  - name: rain_rate
-    description: Rainfall intensity.
-    category: environment
-    type: continuous
-    unit: mm/h
-    range: [0, 100]
-    synonyms: [rain, precipitation, drizzle, downpour, wet weather]
-  - name: fog_visibility
-    description: Meteorological visibility distance in fog, haze or smoke.
-    category: environment
-    type: continuous
-    unit: m
-    range: [10, 10000]
-    distribution: loguniform
-    synonyms: [fog, haze, mist, smoke, visibility]
-  - name: wind_speed
-    description: Mean wind speed at the robot.
-    category: environment
-    type: continuous
-    unit: m/s
-    range: [0, 30]
-    synonyms: [wind, gusts, breeze]
-  - name: ambient_temperature
-    description: Air or water temperature around the robot.
-    category: environment
-    type: continuous
-    unit: degC
-    range: [-40, 60]
-    synonyms: [temperature, heat, cold, freezing]
-  # --- environment: water ---
-  - name: turbidity
-    description: Suspended particles in water that reduce optical visibility.
-    category: environment
-    type: continuous
-    unit: NTU
-    range: [0.1, 1000]
-    distribution: loguniform
-    synonyms: [murky water, muddy water, water clarity, underwater visibility, silt]
-  - name: current_speed
-    description: Speed of the water current relative to the seabed.
-    category: environment
-    type: continuous
-    unit: m/s
-    range: [0, 5]
-    synonyms: [current, tidal current, water flow, strong current]
-  - name: wave_height
-    description: Significant wave height at the surface.
-    category: environment
-    type: continuous
-    unit: m
-    range: [0, 15]
-    synonyms: [waves, sea state, swell, choppy water]
-  - name: water_depth
-    description: Depth of water at the work site.
-    category: environment
-    type: continuous
-    unit: m
-    range: [0, 3000]
-    synonyms: [depth, operating depth]
-  - name: marine_growth
-    description: Thickness of biofouling on submerged structures.
-    category: environment
-    type: continuous
-    unit: mm
-    range: [0, 300]
-    synonyms: [biofouling, fouling, barnacles, mussels, marine fouling]
-  # --- environment: terrain and space ---
-  - name: floor_type
-    description: Floor or ground surface along the route; sets traction.
-    category: environment
-    type: categorical
-    values: [tile, wood, carpet, rug, wet_tile, concrete, asphalt, gravel, grass, mud, sand, ice]
-    synonyms: [floor, surface, ground, terrain type, flooring]
-  - name: surface_friction
-    description: Tyre-ground or foot-ground friction coefficient.
-    category: environment
-    type: continuous
-    range: [0.05, 1.2]
-    synonyms: [friction, traction, slippery, grip]
-  - name: slope
-    description: Inclination of the ground along the route.
-    category: environment
-    type: continuous
-    unit: deg
-    range: [0, 45]
-    synonyms: [incline, gradient, ramp, hill]
-  - name: room_type
-    description: Room the task takes place in.
-    category: environment
-    type: categorical
-    values: [kitchen, living room, bedroom, bathroom, home office, hallway, warehouse aisle]
-    synonyms: [room, location, area]
-  - name: room_area
-    description: Floor area of the room or workspace.
-    category: environment
-    type: continuous
-    unit: m^2
-    range: [2, 5000]
-    synonyms: [room size, workspace size, floor area]
-  - name: clutter
-    description: How many unrelated objects are in the workspace.
-    category: environment
-    type: categorical
-    values: [tidy, moderate, cluttered]
-    synonyms: [mess, untidy, obstacles on surfaces]
-  - name: obstacle_density
-    description: Static obstacles per unit floor area.
-    category: environment
-    type: continuous
-    unit: 1/m^2
-    range: [0, 2]
-    synonyms: [obstacles, furniture density, crowding by objects]
-  # --- environment: people and agents ---
-  - name: person_speed
-    description: Walking speed of a person moving near the robot.
-    category: environment
-    type: continuous
-    unit: m/s
-    range: [0, 3]
-    distribution: normal(1.0, 0.3)
-    synonyms: [walking speed, pedestrian speed, human speed]
-  - name: pedestrian_density
-    description: People per unit floor area around the robot.
-    category: environment
-    type: continuous
-    unit: 1/m^2
-    range: [0, 2]
-    synonyms: [crowd, crowd density, people around, busy]
-  # --- platform ---
-  - name: max_speed
-    description: Speed limit configured on the robot base.
-    category: platform
-    type: continuous
-    unit: m/s
-    range: [0, 5]
-    synonyms: [speed limit, top speed, velocity limit]
-  - name: payload_mass
-    description: Mass of the load the robot carries or manipulates.
-    category: platform
-    type: continuous
-    unit: kg
-    range: [0, 500]
-    synonyms: [payload, load, carried weight, object mass]
-  - name: battery_level
-    description: Battery state of charge.
-    category: platform
-    type: continuous
-    range: [0, 1]
-    synonyms: [state of charge, battery, charge level, low battery]
-  # --- task ---
-  - name: goal_distance
-    description: Straight-line distance from start to goal.
-    category: task
-    type: continuous
-    unit: m
-    range: [0, 1000]
-    synonyms: [route length, travel distance, distance to goal]
-  - name: target_object
-    description: The object the robot has to find or manipulate.
-    category: task
-    type: categorical
-    values: [mug, bowl, bottle, box, book, tool]
-    synonyms: [target, object to pick, item]
-  # --- sensors ---
-  - name: sensor_range
-    description: Maximum range at which the perception system reports detections.
-    category: sensors
-    type: continuous
-    unit: m
-    range: [0.1, 200]
-    synonyms: [detection range, perception range, lidar range, camera range]
-  - name: localization_noise
-    description: Standard deviation of the robot's position estimate error.
-    category: sensors
-    type: continuous
-    unit: m
-    range: [0, 5]
-    synonyms: [localization error, pose noise, position uncertainty, drift]
-  - name: gnss_availability
-    description: Whether satellite positioning is available.
-    category: sensors
-    type: boolean
-    distribution: bernoulli(0.9)
-    synonyms: [gps, gnss, satellite fix, gps denied]
-  # --- faults ---
-  - name: sensor_dropout
-    description: Probability that a perception frame is lost.
-    category: faults
-    type: continuous
-    range: [0, 1]
-    distribution: beta(1, 8)
-    synonyms: [frame drops, dropped frames, sensor outage, camera dropout]
-  - name: comms_latency
-    description: Round-trip latency of the link to the operator or fleet server.
-    category: faults
-    type: continuous
-    unit: ms
-    range: [1, 10000]
-    distribution: loguniform
-    synonyms: [latency, network delay, lag, tether delay, acoustic link delay]
-  - name: comms_loss
-    description: Whether the link to the operator or fleet server drops out.
-    category: faults
-    type: boolean
-    distribution: bernoulli(0.05)
-    synonyms: [link loss, connection loss, network outage, lost comms]
+nodes:
+- id: environment
+  label: Environment
+  definition: The world around the robot.
+- id: light
+  parent: environment
+  label: Light
+  definition: Illumination and glare reaching the robot's sensors.
+- id: lighting
+  parent: light
+  label: Lighting
+  definition: Ambient light at the robot's working height.
+  aliases:
+  - illumination
+  - ambient light
+  - brightness
+  - light level
+  - darkness
+  - dim
+  - dusk
+  type: continuous
+  unit: lux
+  range:
+  - 0.1
+  - 100000
+  distribution: loguniform
+  grounding:
+    sim: lighting_lux
+- id: glare
+  parent: light
+  label: Glare
+  definition: Direct sunlight or reflections shining into the cameras.
+  aliases:
+  - sun glare
+  - low sun
+  - reflections
+  - specular highlights
+  type: boolean
+  distribution: bernoulli(0.1)
+- id: weather
+  parent: environment
+  label: Weather
+  definition: Precipitation, fog, wind and air temperature outdoors.
+- id: rain_rate
+  parent: weather
+  label: Rain rate
+  definition: Rainfall intensity.
+  aliases:
+  - rain
+  - precipitation
+  - drizzle
+  - downpour
+  - wet weather
+  type: continuous
+  unit: mm/h
+  range:
+  - 0
+  - 100
+- id: fog_visibility
+  parent: weather
+  label: Fog visibility
+  definition: Meteorological visibility distance in fog, haze or smoke.
+  aliases:
+  - fog
+  - haze
+  - mist
+  - smoke
+  - visibility
+  type: continuous
+  unit: m
+  range:
+  - 10
+  - 10000
+  distribution: loguniform
+- id: wind_speed
+  parent: weather
+  label: Wind speed
+  definition: Mean wind speed at the robot.
+  aliases:
+  - wind
+  - gusts
+  - breeze
+  type: continuous
+  unit: m/s
+  range:
+  - 0
+  - 30
+- id: ambient_temperature
+  parent: weather
+  label: Ambient temperature
+  definition: Air or water temperature around the robot.
+  aliases:
+  - temperature
+  - heat
+  - cold
+  - freezing
+  type: continuous
+  unit: degC
+  range:
+  - -40
+  - 60
+- id: water
+  parent: environment
+  label: Water
+  definition: Conditions of water the robot works in or near.
+- id: water_optical
+  parent: water
+  label: Optical
+  definition: How well light travels through the water.
+- id: turbidity
+  parent: water_optical
+  label: Turbidity
+  definition: Suspended particles in water that reduce optical visibility.
+  aliases:
+  - murky water
+  - muddy water
+  - water clarity
+  - underwater visibility
+  - silt
+  type: continuous
+  unit: NTU
+  range:
+  - 0.1
+  - 1000
+  distribution: loguniform
+- id: water_motion
+  parent: water
+  label: Motion
+  definition: Currents and waves moving the water.
+- id: current_speed
+  parent: water_motion
+  label: Current speed
+  definition: Speed of the water current relative to the seabed.
+  aliases:
+  - current
+  - tidal current
+  - water flow
+  - strong current
+  type: continuous
+  unit: m/s
+  range:
+  - 0
+  - 5
+- id: wave_height
+  parent: water_motion
+  label: Wave height
+  definition: Significant wave height at the surface.
+  aliases:
+  - waves
+  - sea state
+  - swell
+  - choppy water
+  type: continuous
+  unit: m
+  range:
+  - 0
+  - 15
+- id: water_site
+  parent: water
+  label: Site
+  definition: Depth and fouling at the underwater work site.
+- id: water_depth
+  parent: water_site
+  label: Water depth
+  definition: Depth of water at the work site.
+  aliases:
+  - depth
+  - operating depth
+  type: continuous
+  unit: m
+  range:
+  - 0
+  - 3000
+- id: marine_growth
+  parent: water_site
+  label: Marine growth
+  definition: Thickness of biofouling on submerged structures.
+  aliases:
+  - biofouling
+  - fouling
+  - barnacles
+  - mussels
+  - marine fouling
+  type: continuous
+  unit: mm
+  range:
+  - 0
+  - 300
+- id: terrain
+  parent: environment
+  label: Terrain
+  definition: Ground surface, grip and slope along the route.
+- id: floor_type
+  parent: terrain
+  label: Floor type
+  definition: Floor or ground surface along the route; sets traction.
+  aliases:
+  - floor
+  - surface
+  - ground
+  - terrain type
+  - flooring
+  type: categorical
+  values:
+  - tile
+  - wood
+  - carpet
+  - rug
+  - wet_tile
+  - concrete
+  - asphalt
+  - gravel
+  - grass
+  - mud
+  - sand
+  - ice
+- id: surface_friction
+  parent: terrain
+  label: Surface friction
+  definition: Tyre-ground or foot-ground friction coefficient.
+  aliases:
+  - friction
+  - traction
+  - slippery
+  - grip
+  type: continuous
+  range:
+  - 0.05
+  - 1.2
+- id: slope
+  parent: terrain
+  label: Slope
+  definition: Inclination of the ground along the route.
+  aliases:
+  - incline
+  - gradient
+  - ramp
+  - hill
+  type: continuous
+  unit: deg
+  range:
+  - 0
+  - 45
+- id: space
+  parent: environment
+  label: Space
+  definition: Size, layout and clutter of the workspace.
+- id: room_type
+  parent: space
+  label: Room type
+  definition: Room the task takes place in.
+  aliases:
+  - room
+  - location
+  - area
+  type: categorical
+  values:
+  - kitchen
+  - living room
+  - bedroom
+  - bathroom
+  - home office
+  - hallway
+  - warehouse aisle
+- id: room_area
+  parent: space
+  label: Room area
+  definition: Floor area of the room or workspace.
+  aliases:
+  - room size
+  - workspace size
+  - floor area
+  type: continuous
+  unit: m^2
+  range:
+  - 2
+  - 5000
+- id: clutter
+  parent: space
+  label: Clutter
+  definition: How many unrelated objects are in the workspace.
+  aliases:
+  - mess
+  - untidy
+  - obstacles on surfaces
+  type: categorical
+  values:
+  - tidy
+  - moderate
+  - cluttered
+- id: obstacle_density
+  parent: space
+  label: Obstacle density
+  definition: Static obstacles per unit floor area.
+  aliases:
+  - obstacles
+  - furniture density
+  - crowding by objects
+  type: continuous
+  unit: 1/m^2
+  range:
+  - 0
+  - 2
+- id: people
+  parent: environment
+  label: People
+  definition: Humans moving around the robot.
+- id: person_speed
+  parent: people
+  label: Person speed
+  definition: Walking speed of a person moving near the robot.
+  aliases:
+  - walking speed
+  - pedestrian speed
+  - human speed
+  type: continuous
+  unit: m/s
+  range:
+  - 0
+  - 3
+  distribution: normal(1.0, 0.3)
+- id: pedestrian_density
+  parent: people
+  label: Pedestrian density
+  definition: People per unit floor area around the robot.
+  aliases:
+  - crowd
+  - crowd density
+  - people around
+  - busy
+  type: continuous
+  unit: 1/m^2
+  range:
+  - 0
+  - 2
+- id: platform
+  label: Platform
+  definition: 'The robot itself: speed limits, payload, power.'
+- id: max_speed
+  parent: platform
+  label: Max speed
+  definition: Speed limit configured on the robot base.
+  aliases:
+  - speed limit
+  - top speed
+  - velocity limit
+  type: continuous
+  unit: m/s
+  range:
+  - 0
+  - 5
+- id: payload_mass
+  parent: platform
+  label: Payload mass
+  definition: Mass of the load the robot carries or manipulates.
+  aliases:
+  - payload
+  - load
+  - carried weight
+  - object mass
+  type: continuous
+  unit: kg
+  range:
+  - 0
+  - 500
+- id: battery_level
+  parent: platform
+  label: Battery level
+  definition: Battery state of charge.
+  aliases:
+  - state of charge
+  - battery
+  - charge level
+  - low battery
+  type: continuous
+  range:
+  - 0
+  - 1
+- id: task
+  label: Task
+  definition: What the robot is asked to do.
+- id: goal_distance
+  parent: task
+  label: Goal distance
+  definition: Straight-line distance from start to goal.
+  aliases:
+  - route length
+  - travel distance
+  - distance to goal
+  type: continuous
+  unit: m
+  range:
+  - 0
+  - 1000
+- id: target_object
+  parent: task
+  label: Target object
+  definition: The object the robot has to find or manipulate.
+  aliases:
+  - target
+  - object to pick
+  - item
+  type: categorical
+  values:
+  - mug
+  - bowl
+  - bottle
+  - box
+  - book
+  - tool
+- id: sensors
+  label: Sensors
+  definition: Perception and localization capabilities.
+- id: perception
+  parent: sensors
+  label: Perception
+  definition: Detecting objects and people around the robot.
+- id: sensor_range
+  parent: perception
+  label: Sensor range
+  definition: Maximum range at which the perception system reports detections.
+  aliases:
+  - detection range
+  - perception range
+  - lidar range
+  - camera range
+  type: continuous
+  unit: m
+  range:
+  - 0.1
+  - 200
+- id: localization
+  parent: sensors
+  label: Localization
+  definition: Knowing where the robot is.
+- id: localization_noise
+  parent: localization
+  label: Localization noise
+  definition: Standard deviation of the robot's position estimate error.
+  aliases:
+  - localization error
+  - pose noise
+  - position uncertainty
+  - drift
+  type: continuous
+  unit: m
+  range:
+  - 0
+  - 5
+- id: gnss_availability
+  parent: localization
+  label: GNSS availability
+  definition: Whether satellite positioning is available.
+  aliases:
+  - gps
+  - gnss
+  - satellite fix
+  - gps denied
+  type: boolean
+  distribution: bernoulli(0.9)
+- id: faults
+  label: Faults
+  definition: Degradations and failures.
+- id: sensor_faults
+  parent: faults
+  label: Sensor faults
+  definition: Lost or corrupted sensor data.
+- id: sensor_dropout
+  parent: sensor_faults
+  label: Sensor dropout
+  definition: Probability that a perception frame is lost.
+  aliases:
+  - frame drops
+  - dropped frames
+  - sensor outage
+  - camera dropout
+  type: continuous
+  range:
+  - 0
+  - 1
+  distribution: beta(1, 8)
+- id: comms_faults
+  parent: faults
+  label: Communication faults
+  definition: Delays and outages on the robot's links.
+- id: comms_latency
+  parent: comms_faults
+  label: Comms latency
+  definition: Round-trip latency of the link to the operator or fleet server.
+  aliases:
+  - latency
+  - network delay
+  - lag
+  - tether delay
+  - acoustic link delay
+  type: continuous
+  unit: ms
+  range:
+  - 1
+  - 10000
+  distribution: loguniform
+- id: comms_loss
+  parent: comms_faults
+  label: Comms loss
+  definition: Whether the link to the operator or fleet server drops out.
+  aliases:
+  - link loss
+  - connection loss
+  - network outage
+  - lost comms
+  type: boolean
+  distribution: bernoulli(0.05)

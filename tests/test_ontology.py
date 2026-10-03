@@ -24,6 +24,7 @@ from verdy.odd.resolve import (
     make_resolver,
 )
 from verdy.odd.shortlist import HashingEmbedder, Shortlister
+from verdy.odd.skill import render_skill, skill_sha256
 
 
 def response(data, stop_reason="end_turn"):
@@ -95,7 +96,7 @@ LAYA_PICKS = {"water_clarity": ("turbidity", 0.93), "current": ("current_speed",
 
 def test_core_entries_make_valid_parameters():
     onto = load_ontology("core")
-    assert onto.ref == "core@0.1.0" and "turbidity" in onto
+    assert onto.ref == "core@0.2.0" and "turbidity" in onto
     params = [parameter_from_entry(e, Candidate(e.name), {"source": "ontology",
                                                           "approved": False})
               for e in onto.entries]
@@ -108,7 +109,7 @@ def test_core_entries_make_valid_parameters():
      "duplicate"),
     ([{"name": "none", "category": "environment", "type": "boolean"}], "reserved"),
     ([{"name": "a", "category": "environment", "type": "continuous"}], "range"),
-    ([{"name": "a", "category": "weather", "type": "boolean"}], "category"),
+    ([{"name": "a", "category": "weather", "type": "boolean"}], "unknown parent"),
 ])
 def test_invalid_ontology(entries, match):
     with pytest.raises(OntologyError, match=match):
@@ -231,7 +232,7 @@ def test_pipeline_llm_laya_llm():
     res = turb.provenance["resolution"]
     assert res["decision"] == "turbidity" and res["probability"] == 0.93
     assert res["phrase"] == "murky water" and res["candidate"] == "water_clarity"
-    assert res["resolver"] == "laya" and res["ontology"] == "core@0.1.0"
+    assert res["resolver"] == "laya" and res["ontology"] == "core@0.2.0"
 
     cur = odd["current_speed"]  # knots vs m/s: ontology bounds and a note to convert
     assert cur.range == (0.0, 5.0) and "convert" in cur.provenance["note"]
@@ -242,8 +243,14 @@ def test_pipeline_llm_laya_llm():
     assert odd.constraints == ["turbidity < 40 or current_speed < 2.5",
                                "jacket_leg_spacing > 1"]
     meta = odd.metadata["authoring"]
-    assert meta == {"ontology": "core@0.1.0", "resolver": "laya", "embedder": "hashing",
+    skill_digest = meta.pop("skill_sha256")
+    assert meta == {"ontology": "core@0.2.0", "resolver": "laya", "embedder": "hashing",
                     "top_k": 15, "matched": 2, "new_entries": 1}
+    assert skill_digest == skill_sha256(render_skill(load_ontology("core")))
+    assert new.provenance["ontology_parent"] == "task"  # LLM proposed no valid group
+    assert "Naming conventions" in client.calls[0]["system"]  # extraction saw SKILL.md
+    assert "# Task (`task`)" in client.calls[1]["system"]  # misses saw their branch only
+    assert "# Environment (`environment`)" not in client.calls[1]["system"]
     doc = odd.to_dict()
     assert check_odd(doc).ok and not check_odd(doc, strict=True).ok
     for p in doc["parameters"]:

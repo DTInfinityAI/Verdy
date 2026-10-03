@@ -12,6 +12,28 @@ OpenAI. It handles their keys so they are used but never exposed.
 | Output is redacted | Error messages, logs, SceneSmith output and reports pass through a redactor that removes every loaded key and anything shaped like an API key. |
 | Least privilege | SceneSmith subprocesses get a minimal environment with only the keys they need. They never see your Anthropic key. |
 
+## How keys flow
+
+```mermaid
+flowchart LR
+    env["Environment variables<br/>CI and cloud secret stores"] -->|"take precedence"| lookup{"Secret lookup<br/>by name only"}
+    file[("~/.config/verdy/secrets.env<br/>chmod 600, outside every repo")] --> lookup
+    config["Run config"] -->|"secret names"| lookup
+    config -.->|"holds a key-shaped value"| reject["Rejected before anything runs"]
+    lookup --> secret["Secret object<br/>prints as name, source, fingerprint"]
+    secret -->|"value handed over"| claude["Claude client<br/>ANTHROPIC_API_KEY"]
+    secret -->|"minimal env: listed keys only"| scenesmith["SceneSmith subprocess<br/>OPENAI_API_KEY, GOOGLE_API_KEY"]
+    secret -->|"HMAC key"| sign["Report signing<br/>VERDY_SIGNING_KEY"]
+    secret -->|"one-way hash"| fp["Fingerprint<br/>sha256, hmac or none"]
+    fp --> report[("Evidence report<br/>fingerprints, never keys")]
+    claude & scenesmith --> redact["Redactor<br/>removes loaded keys and key-shaped strings"]
+    redact --> out["Logs, errors, stored output"]
+    scan["verdy secrets scan"] -.->|"exit 1 on a committed key"| ci{"CI"}
+```
+
+A key's value only reaches the client that needs it. Everything else sees its name and
+fingerprint, and everything written out passes through the redactor.
+
 ## Setting keys
 
 | Secret | Used for |

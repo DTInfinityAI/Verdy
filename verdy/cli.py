@@ -17,6 +17,8 @@ from verdy import __version__
 EXIT_CODES = {"PASS": 0, "FAIL": 1, "INCONCLUSIVE": 3}
 
 
+DEFAULT_APPROVAL_LOG = ".verdy/ontology/approvals.jsonl"  # verdy.odd.approvals.DEFAULT_LOG
+
 DEFAULT_SECRET_NAMES = [
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "VERDY_SIGNING_KEY",
     "VERDY_FINGERPRINT_KEY",
@@ -357,44 +359,265 @@ def _print_resolutions(odd) -> None:
 
 
 def cmd_ontology_list(args: argparse.Namespace) -> int:
-    from verdy.odd.ontology import load_ontology
+    from verdy.odd.ontology import OntologyEntry, load_ontology
 
     onto = load_ontology(args.ontology)
-    print(f"{onto.ref}: {len(onto)} entries")
-    for e in onto.entries:
-        unit = f" [{e.unit}]" if e.unit else ""
-        print(f"  {e.name:<24} {e.category:<12} {e.type:<12}{unit}  {e.description}")
+    print(f"{onto.ref}: {len(onto)} parameters in {len(onto.groups)} groups")
+
+    def show(name: str | None, depth: int) -> None:
+        for n in onto.children(name):
+            pad = "  " * (depth + 1)
+            draft = "  [draft]" if n.status == "draft" else ""
+            if isinstance(n, OntologyEntry):
+                unit = f" [{n.unit}]" if n.unit else ""
+                print(f"{pad}{n.name:<{max(4, 26 - 2 * depth)}} {n.type}{unit}{draft}")
+            else:
+                print(f"{pad}{n.name}/{draft}")
+                show(n.name, depth + 1)
+
+    show(None, 0)
+    return 0
+
+
+def cmd_ontology_validate(args: argparse.Namespace) -> int:
+    from verdy.odd.ontology import OntologyError, load_ontology
+
+    status = 0
+    for ref in args.ontologies:
+        try:
+            onto = load_ontology(ref)
+        except (OntologyError, FileNotFoundError) as exc:
+            print(f"{ref}: INVALID: {exc}")
+            status = 1
+            continue
+        errors, warnings = onto.check(args.max_children)
+        for w in warnings:
+            print(f"{ref}: warning: {w}")
+        for e in errors:
+            print(f"{ref}: error: {e}")
+        if errors:
+            status = 1
+        else:
+            print(f"{ref}: OK ({onto.ref}, {len(onto)} parameters, {len(onto.groups)} groups)")
+    return status
+
+
+def cmd_ontology_render(args: argparse.Namespace) -> int:
+    from verdy.odd.ontology import load_ontology
+    from verdy.odd.skill import render_skill, skill_sha256, write_skill
+
+    onto = load_ontology(args.ontology)
+    changed = write_skill(onto, args.output, check=args.check)
+    digest = skill_sha256(render_skill(onto))
+    if args.check:
+        if changed:
+            print(f"{args.output} is out of date with {onto.ref}: {', '.join(changed)}")
+            print(f"Run: verdy ontology render {args.ontology} -o {args.output}")
+            return 1
+        print(f"{args.output} is up to date with {onto.ref} (skill sha256 {digest[:16]})")
+        return 0
+    print(f"Rendered {onto.ref} to {args.output} (skill sha256 {digest[:16]}): "
+          f"{len(changed)} files changed")
+    return 0
+
+
+def _log_approvals(odd, onto, log_path) -> int:
+    from verdy.odd.approvals import append_approvals, approvals_from_odd
+
+    records, notes = approvals_from_odd(odd, onto)
+    added = append_approvals(records, log_path)
+    print(f"Logged {added} new approvals to {log_path} "
+          f"({len(records) - added} already logged)")
+    for note in notes:
+        print(f"  skipped {note}")
+    return added
+
+
+def cmd_ontology_log(args: argparse.Namespace) -> int:
+    from verdy.odd import load_odd
+    from verdy.odd.ontology import load_ontology
+
+    _log_approvals(load_odd(args.odd), load_ontology(args.ontology), args.log)
     return 0
 
 
 def cmd_ontology_add(args: argparse.Namespace) -> int:
     from verdy.odd import load_odd
-    from verdy.odd.ontology import BUNDLED, OntologyEntry, load_ontology, save_ontology
+    from verdy.odd.ontology import (
+        BUNDLED,
+        OntologyEntry,
+        OntologyGroup,
+        load_ontology,
+        save_ontology,
+    )
 
     if args.ontology in BUNDLED and not args.output:
         return _err(f"{args.ontology} is bundled with Verdy; write the extended copy with -o FILE")
     onto = load_ontology(args.ontology)
     odd = load_odd(args.odd)
+    if not args.no_log:  # snapshot the "none" options before the new leaves join the tree
+        _log_approvals(odd, onto, args.log)
     added, skipped = [], []
     for p in odd.parameters:
-        if not p.provenance.get("new_ontology_entry"):
+        prov = p.provenance
+        if not prov.get("new_ontology_entry"):
             continue
         if not p.approved:
             skipped.append(f"{p.name} (not approved)")
             continue
-        if p.name in onto:
+        if onto.has_node(p.name):
             skipped.append(f"{p.name} (already in {onto.ref})")
             continue
-        phrase = (p.provenance.get("resolution") or {}).get("phrase")
-        onto.add(OntologyEntry.from_parameter(p, [phrase] if phrase else []))
-        added.append(p.name)
+        res = prov.get("resolution") or {}
+        parent = prov.get("ontology_parent") or res.get("placement") or p.category
+        if not onto.is_group(parent):
+            parent = p.category
+        if not onto.has_node(parent):
+            onto.add(OntologyGroup(name=parent, label=parent.capitalize()))
+        aliases = [x for x in [res.get("phrase"), *prov.get("also_mentioned_as", [])] if x]
+        onto.add(OntologyEntry.from_parameter(p, list(dict.fromkeys(aliases)), parent=parent))
+        added.append(f"{p.name} (under {' → '.join(onto.path(parent))})")
     output = args.output or args.ontology
     if added:
         save_ontology(onto, output)
     print(f"Added {len(added)} entries to {output}: {', '.join(added) or '-'}")
     for s in skipped:
         print(f"  skipped {s}")
+    errors, _ = onto.check()
+    for e in errors:
+        print(f"  warning: {e}")
+    if added:
+        print("Re-render the skill: verdy ontology render "
+              f"{output} -o <skill dir>")
     return 0
+
+
+def cmd_ontology_paraphrase(args: argparse.Namespace) -> int:
+    from verdy.odd.approvals import append_approvals, paraphrase, read_approvals
+
+    records = read_approvals(args.log)
+    synthetic = paraphrase(records, n=args.n, model=args.model)
+    added = append_approvals(synthetic, args.log)
+    print(f"Added {added} synthetic paraphrases to {args.log} (tagged source: synthetic; "
+          "held-out evaluation uses human approvals only)")
+    return 0
+
+
+def cmd_ontology_regroup(args: argparse.Namespace) -> int:
+    from verdy.odd.ontology import BUNDLED, load_ontology, save_ontology
+    from verdy.odd.regroup import apply_proposal, over_limit, propose_groups
+
+    if args.ontology in BUNDLED and not args.output:
+        return _err(f"{args.ontology} is bundled with Verdy; write the regrouped copy with -o FILE")
+    onto = load_ontology(args.ontology)
+    nodes = args.nodes or over_limit(onto, args.max_children)
+    if not nodes:
+        print(f"{onto.ref}: no node has more than "
+              f"{args.max_children or onto.max_children} children; nothing to regroup.")
+        return 0
+    for node in nodes:
+        proposal = propose_groups(onto, node, model=args.model, max_children=args.max_children)
+        onto = apply_proposal(onto, proposal)
+        print(f"{node}: {len(proposal.groups)} new draft groups "
+              f"({len(onto.children(node))} children now)")
+        for g in proposal.groups:
+            print(f"  + {g.id} ({g.label}): {', '.join(g.children)}")
+        if proposal.rationale:
+            print(f"  why: {proposal.rationale}")
+    output = args.output or args.ontology
+    save_ontology(onto, output)
+    print(f"Wrote {output}. Review the groups marked status: draft, then set status: approved "
+          "(or edit them), and re-render the skill.")
+    return 0
+
+
+def cmd_laya_dataset(args: argparse.Namespace) -> int:
+    from verdy.finetune.dataset import export_dataset
+    from verdy.odd.approvals import log_sha256, read_approvals
+    from verdy.odd.ontology import load_ontology
+
+    onto = load_ontology(args.ontology)
+    records = read_approvals(args.log)
+    if not records:
+        return _err(f"no approvals in {args.log}; log approved ODDs with verdy ontology log")
+    m = export_dataset(onto, records, args.output, holdout=args.holdout, seed=args.seed,
+                       log_sha256=log_sha256(args.log))
+    print(f"Wrote {args.output}: {m['train']['rows']} training rows, "
+          f"{m['heldout']['rows']} held-out rows from {m['approvals']['human']} human and "
+          f"{m['approvals']['synthetic']} synthetic approvals ({onto.ref}).")
+    for sk in m["skipped"][:10]:
+        print(f"  skipped {sk['phrase']!r}: {sk['reason']}")
+    if len(m["skipped"]) > 10:
+        print(f"  ... {len(m['skipped']) - 10} more in manifest.json")
+    return 0
+
+
+def cmd_laya_items(args: argparse.Namespace) -> int:
+    from verdy.finetune.items import build_items_file
+
+    n, skipped = build_items_file(args.train, args.model_dir, args.output,
+                                  max_len=args.max_len, head_max_len=args.head_max_len)
+    print(f"Wrote {n} training items to {args.output} ({skipped} skipped).")
+    print("Train with Laya's script, e.g.: python laya_finetune_typed_decisions_mps.py "
+          f"--model-dir {args.model_dir} --items {args.output} --output-dir ./laya_verdy")
+    return 0
+
+
+def _laya_eval_report(spec: str, rows) -> dict:
+    from verdy.finetune.evaluate import evaluate_rows
+    from verdy.odd.resolve import LAYA_CHECKPOINTS, laya_predictor
+
+    if spec.endswith(".json") and Path(spec).is_file():
+        return json.loads(Path(spec).read_text("utf-8"))
+    predictor = laya_predictor(spec)
+    kwargs = {"model": spec} if spec in LAYA_CHECKPOINTS else {}
+    return evaluate_rows(lambda s, q: predictor.predict(s, q, **kwargs), rows, checkpoint=spec)
+
+
+def _print_eval(report: dict) -> None:
+    o = report["overall"]
+    print(f"{report.get('checkpoint') or 'report'}: accuracy {o['accuracy']}, "
+          f"ECE {o['ece']}, Brier {o['brier']} (n={o['n']})")
+    for level, r in report["by_level"].items():
+        print(f"  level {level}: accuracy {r['accuracy']}, ECE {r['ece']} (n={r['n']})")
+    for kind, r in report["by_kind"].items():
+        print(f"  {kind:<6}  accuracy {r['accuracy']} (n={r['n']})")
+
+
+def cmd_laya_eval(args: argparse.Namespace) -> int:
+    from verdy.finetune.evaluate import compare_reports
+    from verdy.finetune.items import read_rows
+
+    rows = read_rows(args.heldout)
+    if not rows:
+        return _err(f"{args.heldout} has no rows")
+    report = _laya_eval_report(args.checkpoint, rows)
+    _print_eval(report)
+    if args.output:
+        Path(args.output).write_text(json.dumps(report, indent=2) + "\n", "utf-8")
+    if not args.baseline:
+        return 0
+    base = _laya_eval_report(args.baseline, rows)
+    _print_eval(base)
+    promote, reasons = compare_reports(report, base, tolerance=args.tolerance)
+    print(("PROMOTE " if promote else "KEEP CURRENT ") + f"{args.checkpoint} vs {args.baseline}:")
+    for r in reasons:
+        print(f"  {r}")
+    return 0 if promote else 1
+
+
+def cmd_laya_due(args: argparse.Namespace) -> int:
+    from verdy.odd.approvals import read_approvals
+
+    human = sum(1 for a in read_approvals(args.log) if a.source == "human")
+    used = 0
+    if args.manifest and Path(args.manifest).is_file():
+        used = json.loads(Path(args.manifest).read_text("utf-8"))["approvals"]["human"]
+    new = human - used
+    due = new >= args.every
+    print(f"{human} human approvals, {used} in the last dataset, {new} new: retraining "
+          + ("is due." if due else f"is not due (every {args.every})."))
+    return 0 if due else 1
 
 
 def cmd_secrets_status(args: argparse.Namespace) -> int:
@@ -536,8 +759,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="bundled ontology name or file to resolve against (default core); "
                         "'none' lets Claude write every parameter")
     p.add_argument("--resolver", default="exact",
-                   help="exact (default), laya (local, pip install 'verdy[laya]'), llm, "
-                        "or module:attribute")
+                   help="exact (default), laya or laya-tree (local, pip install "
+                        "'verdy[laya]'), llm, or module:attribute")
     p.add_argument("--resolver-option", action="append", metavar="KEY=VALUE",
                    help="option for the resolver, e.g. checkpoint=multilingual (repeatable)")
     p.add_argument("--min-probability", type=float,
@@ -547,17 +770,82 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top-k", type=int, default=15, help="shortlist size (default 15)")
     p.set_defaults(func=cmd_author)
 
-    p = sub.add_parser("ontology", help="list or extend a parameter ontology")
+    p = sub.add_parser("ontology", help="validate, render, log and extend a parameter ontology")
     onto_sub = p.add_subparsers(dest="ontology_command", required=True)
-    q = onto_sub.add_parser("list", help="list the entries of an ontology")
+    q = onto_sub.add_parser("list", help="show an ontology's tree")
     q.add_argument("ontology", nargs="?", default="core", help="bundled name or file")
     q.set_defaults(func=cmd_ontology_list)
+    q = onto_sub.add_parser("validate", help="check structure and the children-per-node limit")
+    q.add_argument("ontologies", nargs="+", metavar="ONTOLOGY")
+    q.add_argument("--max-children", type=int,
+                   help="override the ontology's max_children (default 15)")
+    q.set_defaults(func=cmd_ontology_validate)
+    q = onto_sub.add_parser("render", help="render SKILL.md and per-branch references")
+    q.add_argument("ontology", help="bundled name or file")
+    q.add_argument("-o", "--output", required=True, help="skill directory")
+    q.add_argument("--check", action="store_true",
+                   help="exit 1 if the rendered files are out of date (for CI)")
+    q.set_defaults(func=cmd_ontology_render)
+    q = onto_sub.add_parser("log", help="log an ODD's approved resolutions (phrase -> leaf)")
+    q.add_argument("odd")
+    q.add_argument("--ontology", default="core", help="bundled name or file (default core)")
+    q.add_argument("--log", default=str(DEFAULT_APPROVAL_LOG), help="approval log (JSON Lines)")
+    q.set_defaults(func=cmd_ontology_log)
     q = onto_sub.add_parser(
-        "add", help="add an ODD's approved new_ontology_entry parameters to an ontology")
+        "add", help="log an ODD's approvals and add its approved new entries to an ontology")
     q.add_argument("odd")
     q.add_argument("--ontology", required=True, help="ontology file (or core with -o)")
     q.add_argument("-o", "--output", help="write here instead of updating --ontology")
+    q.add_argument("--log", default=str(DEFAULT_APPROVAL_LOG), help="approval log (JSON Lines)")
+    q.add_argument("--no-log", action="store_true", help="don't log approvals")
     q.set_defaults(func=cmd_ontology_add)
+    q = onto_sub.add_parser(
+        "regroup", help="have Claude propose intermediate groups for nodes over the limit")
+    q.add_argument("ontology", help="ontology file (or core with -o)")
+    q.add_argument("nodes", nargs="*", metavar="NODE",
+                   help="groups to regroup (default: every group over the limit)")
+    q.add_argument("-o", "--output", help="write here instead of updating the ontology")
+    q.add_argument("--max-children", type=int,
+                   help="override the ontology's max_children (default 15)")
+    q.add_argument("--model", default="claude-opus-5-5")
+    q.set_defaults(func=cmd_ontology_regroup)
+    q = onto_sub.add_parser("paraphrase",
+                            help="add synthetic LLM paraphrases of approved phrases to the log")
+    q.add_argument("--log", default=str(DEFAULT_APPROVAL_LOG))
+    q.add_argument("-n", type=int, default=3, help="paraphrases per phrase (default 3)")
+    q.add_argument("--model", default="claude-opus-5-5")
+    q.set_defaults(func=cmd_ontology_paraphrase)
+
+    p = sub.add_parser("laya", help="fine-tune and evaluate the Laya tree walker")
+    laya_sub = p.add_subparsers(dest="laya_command", required=True)
+    q = laya_sub.add_parser("dataset", help="per-level train and held-out data from approvals")
+    q.add_argument("--ontology", default="core", help="bundled name or file (default core)")
+    q.add_argument("--log", default=str(DEFAULT_APPROVAL_LOG))
+    q.add_argument("-o", "--output", default="laya_data", help="output directory")
+    q.add_argument("--holdout", type=float, default=0.2, help="held-out fraction (default 0.2)")
+    q.add_argument("--seed", type=int, default=0)
+    q.set_defaults(func=cmd_laya_dataset)
+    q = laya_sub.add_parser("items", help="tokenize train.jsonl for Laya's fine-tuning script")
+    q.add_argument("train", help="train.jsonl from verdy laya dataset")
+    q.add_argument("--model-dir", required=True, help="local copy of the base checkpoint")
+    q.add_argument("-o", "--output", default="train_items.pt")
+    q.add_argument("--max-len", type=int, default=1024)
+    q.add_argument("--head-max-len", type=int, default=256)
+    q.set_defaults(func=cmd_laya_items)
+    q = laya_sub.add_parser("eval", help="score a checkpoint per level; gate its promotion")
+    q.add_argument("heldout", help="heldout.jsonl from verdy laya dataset")
+    q.add_argument("--checkpoint", required=True,
+                   help="fine-tuned directory, Hub id, or english/multilingual/typed-decisions")
+    q.add_argument("--baseline", help="current checkpoint, or a saved report .json")
+    q.add_argument("--tolerance", type=float, default=0.0,
+                   help="accuracy drop allowed at any single level (default 0)")
+    q.add_argument("-o", "--output", help="write the checkpoint's report here")
+    q.set_defaults(func=cmd_laya_eval)
+    q = laya_sub.add_parser("due", help="exit 0 when enough new approvals to retrain")
+    q.add_argument("--log", default=str(DEFAULT_APPROVAL_LOG))
+    q.add_argument("--manifest", help="manifest.json of the last training dataset")
+    q.add_argument("--every", type=int, default=300, help="new human approvals per retrain")
+    q.set_defaults(func=cmd_laya_due)
 
     p = sub.add_parser("secrets", help="check credentials without revealing them")
     secrets_sub = p.add_subparsers(dest="secrets_command", required=True)
