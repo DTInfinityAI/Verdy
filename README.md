@@ -691,6 +691,20 @@ every run's trace as Parquet in a content-addressed store, addressed by the hash
 report already records and batched many traces per file (3,000 runs: 3 files, 7.5 MB),
 and builds a local DuckDB index from reports that can always be rebuilt from them. That makes questions across releases one command:
 
+```mermaid
+flowchart LR
+    run["verdy run --store"] --> report[("Signed evidence report<br/>source of truth, records each trace_sha256")]
+    run --> traces["Run traces"]
+    traces -->|"addressed by SHA-256"| store[("Trace store<br/>.verdy/store/batches/*.parquet")]
+    report -->|"digest checked, then indexed"| index[("DuckDB index<br/>star schema, index_v1.sql")]
+    others["Other reports<br/>*.report.json"] -->|"verdy index"| index
+    index --> history["verdy history<br/>verdicts per suite, regressions"]
+    index --> query["verdy query<br/>read-only SQL"]
+    history -->|"--fail-on-regression"| gate{"CI release gate"}
+    index -.->|"fact_rollout.trace_sha256"| store
+    report -.->|"verdy index --rebuild"| index
+```
+
 ```bash
 cd examples/home_robot
 verdy run run.yaml --store          # home-navigator 1.0.0
