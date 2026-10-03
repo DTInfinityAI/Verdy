@@ -9,7 +9,78 @@ This document is the normative description of ODD documents. The machine-readabl
 the JSON Schema in [`verdy/spec/odd.schema.json`](../verdy/spec/odd.schema.json)
 (`$id: https://dti.ai/verdy/spec/odd/0.4.0`); print it with `verdy schema odd`.
 
+## Where an ODD fits
+
+```mermaid
+flowchart LR
+    human["Written by hand"] --> odd["ODD document<br/>odd.yaml"]
+    author["verdy author<br/>ontology-resolved draft"] --> odd
+    logs["Field logs"] --> odd
+    odd --> validate{"verdy validate<br/>schema, then semantics"}
+    validate -->|"--strict: drafted parameters<br/>need approved: true"| approve["Human approval"]
+    approve --> validate
+    validate -->|"valid"| sample["Samplers draw scenarios<br/>conditioned on the constraints"]
+    sample --> runs["Runs on a backend<br/>grounding.sim sets each value"]
+    runs --> coverage["Coverage<br/>per parameter and pairwise"]
+    coverage --> verdict{"Verdict<br/>safe enough within this ODD"}
+    odd -.->|"grounding.runtime"| monitor["On-robot source of each value<br/>e.g. a topic"]
+    odd -.->|"odd_sha256"| report[("Evidence report")]
+```
+
+An ODD is written by hand, drafted with `verdy author`, or derived from logs. It is validated
+(strictly, drafted parameters need a human's approval), then every scenario is drawn from
+it, coverage is measured against it, and the verdict is stated relative to it. Reports
+embed the ODD and its digest.
+
 ## Document format
+
+The structure, with the optional parts of each parameter:
+
+```mermaid
+classDiagram
+    direction LR
+    class ODD {
+        spec_version
+        name
+        version
+        description
+        constraints
+        metadata
+    }
+    class Parameter {
+        name
+        category
+        type
+        unit
+        range or values and weights
+        distribution
+        default
+    }
+    class Grounding {
+        sim
+        runtime
+    }
+    class Provenance {
+        source
+        confidence
+        approved
+        note
+        new_ontology_entry
+        ontology_parent
+    }
+    class Resolution {
+        resolver
+        decision
+        probability
+        phrase
+        path
+        placement
+    }
+    ODD "1" *-- "1..*" Parameter : parameters
+    Parameter "1" *-- "0..1" Grounding : grounding
+    Parameter "1" *-- "0..1" Provenance : provenance
+    Provenance "1" *-- "0..1" Resolution : resolution
+```
 
 An ODD is a YAML or JSON document. Unknown fields are errors, so typos are caught.
 

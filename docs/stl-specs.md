@@ -6,6 +6,29 @@ Verdy evaluates them with [RTAMT](https://github.com/nickovic/rtamt) and records
 with that much room to spare; negative means it violated it by that much. A spec is
 violated when its robustness is negative (or not a number).
 
+```mermaid
+flowchart TD
+    rollout["Backend rollout"] --> trace["Trace<br/>time + one list per signal"]
+    trace --> check{"validate_trace<br/>uniform time, every signal present?"}
+    check -->|"no, or the run crashed"| error["Errored run<br/>counts as a failure by default"]
+    check -->|"yes"| rtamt["RTAMT scores every spec<br/>robustness = signed margin"]
+    specs[("specs.yaml<br/>STL formulas + severity")] --> rtamt
+    rtamt --> per["Per-spec robustness<br/>e.g. no_collision +0.42, slow_near_person -0.05"]
+    per --> viol{"robustness < 0<br/>or NaN?"}
+    viol -->|"yes"| violated["Spec violated<br/>recorded per spec"]
+    viol -->|"no"| ok["Spec satisfied<br/>with that margin to spare"]
+    violated --> sev{"Severity in fail_on?<br/>default critical, major"}
+    sev -->|"yes"| failed["Run fails<br/>counts toward the verdict"]
+    sev -->|"no"| logged["Reported per spec only"]
+    per --> minrob["Lowest robustness over the deciding specs"]
+    minrob -.-> sampler["Importance sampler<br/>refits towards near-failures"]
+    minrob -.-> reward["Improvement loop<br/>safety-margin reward"]
+    per -->|"with the trace's SHA-256"| report[("Evidence report<br/>trace digest + robustness per spec")]
+```
+
+Robustness does more than decide pass or fail: the lowest margin of each run steers
+importance sampling towards near-failures and is the reward the improvement loop trains on.
+
 ## Specs file
 
 ```yaml

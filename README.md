@@ -31,6 +31,9 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [Key features](#key-features)
 - [Drafting an ODD](#drafting-an-odd)
   - [Training Laya on your approvals](#training-laya-on-your-approvals)
+- [ODD spec](#odd-spec)
+- [Scenario sampling](#scenario-sampling)
+- [STL scoring](#stl-scoring)
 - [Verdicts](#verdicts)
 - [Runtime monitors](#runtime-monitors)
 - [Improvement loop](#improvement-loop)
@@ -523,6 +526,148 @@ log everything, and switch to `laya-tree` once it beats the LLM on held-out appr
 
 The full walkthrough covers hardware, the training script, the promotion rules and
 scheduling: [docs/laya-finetuning.md](docs/laya-finetuning.md).
+
+---
+
+## ODD spec
+
+The ODD (Operational Design Domain) lists the conditions a policy must handle: the
+parameters that vary, their ranges and nominal distributions, and the combinations that
+can't occur. Every verdict is relative to it: `PASS` means safe enough *within this ODD*.
+
+```mermaid
+flowchart LR
+    human["Written by hand"] --> odd["ODD document<br/>odd.yaml"]
+    author["verdy author<br/>ontology-resolved draft"] --> odd
+    logs["Field logs"] --> odd
+    odd --> validate{"verdy validate<br/>schema, then semantics"}
+    validate -->|"--strict: drafted parameters<br/>need approved: true"| approve["Human approval"]
+    approve --> validate
+    validate -->|"valid"| sample["Samplers draw scenarios<br/>conditioned on the constraints"]
+    sample --> runs["Runs on a backend<br/>grounding.sim sets each value"]
+    runs --> coverage["Coverage<br/>per parameter and pairwise"]
+    coverage --> verdict{"Verdict<br/>safe enough within this ODD"}
+    odd -.->|"grounding.runtime"| monitor["On-robot source of each value<br/>e.g. a topic"]
+    odd -.->|"odd_sha256"| report[("Evidence report")]
+```
+
+```mermaid
+classDiagram
+    direction LR
+    class ODD {
+        spec_version
+        name
+        version
+        description
+        constraints
+        metadata
+    }
+    class Parameter {
+        name
+        category
+        type
+        unit
+        range or values and weights
+        distribution
+        default
+    }
+    class Grounding {
+        sim
+        runtime
+    }
+    class Provenance {
+        source
+        confidence
+        approved
+        note
+        new_ontology_entry
+        ontology_parent
+    }
+    class Resolution {
+        resolver
+        decision
+        probability
+        phrase
+        path
+        placement
+    }
+    ODD "1" *-- "1..*" Parameter : parameters
+    Parameter "1" *-- "0..1" Grounding : grounding
+    Parameter "1" *-- "0..1" Provenance : provenance
+    Provenance "1" *-- "0..1" Resolution : resolution
+```
+
+Validate with `verdy validate odd.yaml` (`--strict` also requires every drafted parameter to
+be approved). The full format: [docs/odd-spec.md](docs/odd-spec.md).
+
+---
+
+## Scenario sampling
+
+A sampler turns the ODD into concrete scenarios. Every sampler is deterministic given its
+seed, and every scenario satisfies the ODD's constraints. Pick one by what you need from
+the runs:
+
+```mermaid
+flowchart TD
+    start{"What do you need<br/>from the runs?"} -->|"conditions the robot actually met"| replay["Log replay<br/>type: replay<br/>one scenario per recorded log"]
+    start -->|"an even spread over the ODD<br/>on a small budget"| strat["Stratified, Latin hypercube<br/>type: stratified<br/>each quantile stratum used once"]
+    start -->|"an unbiased failure rate<br/>at the nominal mix"| mc["Monte Carlo<br/>type: monte_carlo<br/>independent nominal draws"]
+    start -->|"rare failures,<br/>e.g. a target of 1% or less"| imp["Importance sampling<br/>type: importance<br/>adapts towards near-failures, weights every run"]
+    replay & strat & mc --> exact["Exact Clopper-Pearson bounds"]
+    imp --> approx["Weighted, approximate bounds<br/>check effective_n"]
+    exact & approx --> verdict{"Verdict"}
+```
+
+```bash
+verdy sample odd.yaml -n 10 --sampler stratified     # preview scenarios
+```
+
+Importance sampling refits its proposal after every batch from the runs that came closest
+to failing, and weights each run so the failure rate is still estimated under the nominal
+ODD. Details: [docs/sampling.md](docs/sampling.md).
+
+---
+
+## STL scoring
+
+Every run is scored against Signal Temporal Logic specs with
+[RTAMT](https://github.com/nickovic/rtamt). Each spec gets a **robustness**: a signed margin
+by which the trace satisfied it (positive) or violated it (negative). For example,
+`speed <= 0.3` has robustness `0.3 - speed`, `always` takes the minimum over time and
+`eventually` the maximum.
+
+```mermaid
+flowchart TD
+    rollout["Backend rollout"] --> trace["Trace<br/>time + one list per signal"]
+    trace --> check{"validate_trace<br/>uniform time, every signal present?"}
+    check -->|"no, or the run crashed"| error["Errored run<br/>counts as a failure by default"]
+    check -->|"yes"| rtamt["RTAMT scores every spec<br/>robustness = signed margin"]
+    specs[("specs.yaml<br/>STL formulas + severity")] --> rtamt
+    rtamt --> per["Per-spec robustness<br/>e.g. no_collision +0.42, slow_near_person -0.05"]
+    per --> viol{"robustness < 0<br/>or NaN?"}
+    viol -->|"yes"| violated["Spec violated<br/>recorded per spec"]
+    viol -->|"no"| ok["Spec satisfied<br/>with that margin to spare"]
+    violated --> sev{"Severity in fail_on?<br/>default critical, major"}
+    sev -->|"yes"| failed["Run fails<br/>counts toward the verdict"]
+    sev -->|"no"| logged["Reported per spec only"]
+    per --> minrob["Lowest robustness over the deciding specs"]
+    minrob -.-> sampler["Importance sampler<br/>refits towards near-failures"]
+    minrob -.-> reward["Improvement loop<br/>safety-margin reward"]
+    per -->|"with the trace's SHA-256"| report[("Evidence report<br/>trace digest + robustness per spec")]
+```
+
+```yaml
+specs:
+  - name: no_collision
+    severity: critical
+    formula: always(dist_obstacle >= 0.0)
+  - name: slow_near_person
+    severity: major
+    formula: always((dist_obstacle <= 0.5) implies (speed <= 0.3))
+```
+
+Guide: [docs/stl-specs.md](docs/stl-specs.md).
 
 ---
 
