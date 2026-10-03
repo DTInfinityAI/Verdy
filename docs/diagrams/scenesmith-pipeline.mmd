@@ -1,0 +1,18 @@
+flowchart TD
+    subgraph build ["Build the scene"]
+        direction LR
+        sampler["Sampled scenario<br/>room_type, clutter, lighting, ..."] --> prompt["1. Prompt writer<br/>Claude (ANTHROPIC_API_KEY)<br/>or a template"]
+        prompt --> cache{"Scene in<br/>.verdy/scenesmith/?"}
+        cache -->|"no"| generate["2. SceneSmith main.py<br/>generates it<br/>own .venv, OPENAI_API_KEY"]
+        cache -->|"yes"| scene["Scene<br/>.dmd.yaml + object state"]
+        generate --> scene
+    end
+    subgraph judge ["Run the policy and judge the task"]
+        direction LR
+        policy["3. Your policy<br/>run(scene, output_dmd, seed)"] --> final["Final scene<br/>objects where<br/>the robot left them"]
+        final --> validate["4. SceneSmith validator<br/>OPENAI_API_KEY"]
+        validate --> trace["Trace signals<br/>task_score, task_success,<br/>requirements_met"]
+        trace --> verdict{"STL specs<br/>and verdict"}
+        verdict --> report[("Evidence report<br/>prompts, key fingerprints,<br/>redacted logs")]
+    end
+    build --> judge

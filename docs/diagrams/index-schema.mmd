@@ -1,0 +1,72 @@
+erDiagram
+    sources ||--o| fact_verdict : "report_digest"
+    dim_odd ||--o{ fact_verdict : "odd_key"
+    dim_policy ||--o{ fact_verdict : "policy_key"
+    dim_backend ||--o{ fact_verdict : "backend_key"
+    fact_verdict ||--o{ fact_rollout : "report_digest"
+    dim_scenario ||--o{ fact_rollout : "scenario_key"
+    fact_rollout ||--o{ fact_rollout_spec : "report_digest, run_id"
+    dim_spec ||--o{ fact_rollout_spec : "spec_key"
+    sources ||--o{ fact_feedback : "source_digest"
+    sources {
+        string report_digest PK
+        string report_path
+        string kind
+        boolean valid
+    }
+    fact_verdict {
+        string report_digest PK
+        string suite_key
+        string status
+        double p_fail
+        double p_lower
+        double p_upper
+        int n_runs
+        double coverage
+    }
+    fact_rollout {
+        string report_digest PK
+        string run_id PK
+        string scenario_key FK
+        boolean failed
+        double weight
+        double min_robustness
+        string trace_sha256
+    }
+    fact_rollout_spec {
+        string report_digest PK
+        string run_id PK
+        string spec_key PK
+        double robustness
+        boolean violated
+    }
+    fact_feedback {
+        string source_digest PK
+        string pair_id PK
+        string choice
+        string labeler
+    }
+    dim_odd {
+        string odd_key PK
+        string name
+        string version
+    }
+    dim_policy {
+        string policy_key PK
+        string name
+        string version
+    }
+    dim_spec {
+        string spec_key PK
+        string name
+        string severity
+    }
+    dim_backend {
+        string backend_key PK
+        string name
+    }
+    dim_scenario {
+        string scenario_key PK
+        string params_json
+        bigint seed
+    }

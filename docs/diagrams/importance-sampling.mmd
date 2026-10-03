@@ -1,0 +1,7 @@
+flowchart TD
+    nominal["Batch 1: nominal draws"] --> run["Run the batch, score robustness"]
+    run --> elite["Elite runs<br/>lowest robustness (elite_fraction) and every failure"]
+    elite --> refit["Refit the proposal<br/>truncated normal over quantiles; re-weighted categories;<br/>smoothing, min_sigma, min_prob"]
+    refit --> mix["Next batch from the defensive mixture<br/>λ·nominal + (1 − λ)·proposal"]
+    mix -->|"weight = nominal / mixture ≤ 1/λ"| run
+    run -->|"after the last batch"| estimate["Self-normalized weighted failure rate<br/>bounds at the effective sample size"]

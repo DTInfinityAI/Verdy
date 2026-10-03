@@ -1,0 +1,20 @@
+flowchart TD
+    subgraph define ["Define the operating domain"]
+        direction LR
+        desc["Plain-language description"] -->|"verdy author"| odd["ODD spec<br/>odd/, spec/"]
+        onto[("Parameter ontology<br/>tree")] -.->|"names, units, bounds"| odd
+    end
+    subgraph test ["Test the policy"]
+        direction LR
+        sampler["Scenario sampler<br/>sampler/"] --> backend["Execution backend<br/>backends/"]
+        backend --> stl["STL scoring<br/>metrics/"]
+        stl --> verdict{"Statistical verdict<br/>PASS / FAIL /<br/>INCONCLUSIVE"}
+    end
+    subgraph keep ["Keep the evidence, improve the policy"]
+        direction LR
+        ledger[("Evidence ledger<br/>signed report")] --> store[("Evidence store<br/>Parquet + DuckDB")]
+        improve["Improvement loop<br/>improve/<br/>trains on failures"]
+    end
+    define --> test
+    test --> keep
+    keep -.->|"re-certify"| test

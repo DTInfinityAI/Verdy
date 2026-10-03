@@ -1,0 +1,15 @@
+flowchart TD
+    subgraph setup ["Before the episode"]
+        direction LR
+        specs[("specs.yaml<br/>the specs the policy<br/>was tested against")] --> check{"Monitorable<br/>online?"}
+        check -->|"always(f) becomes historically(f),<br/>or an explicit monitor: formula"| monitored["Monitored specs<br/>past-time STL"]
+        check -->|"needs the future,<br/>e.g. reach the goal within 20 s"| skipped["Skipped and listed<br/>skip_unmonitorable=True"]
+    end
+    subgraph loop ["On the robot, every dt seconds"]
+        direction LR
+        robot["Robot signals<br/>one sample"] -->|"monitor.update(sample)"| monitor["RuntimeMonitor<br/>RTAMT"]
+        monitor --> status{"MonitorStatus<br/>robustness per spec"}
+        status -->|"ok: next sample"| robot
+        status -->|"violated, latched<br/>for the episode"| stop["Safe stop<br/>reason: status.violated"]
+    end
+    setup --> loop

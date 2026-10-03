@@ -1,0 +1,18 @@
+flowchart TD
+    subgraph author ["Write and validate the ODD"]
+        direction LR
+        human["Written by hand"] --> odd["ODD document<br/>odd.yaml"]
+        drafted["verdy author<br/>ontology-resolved draft"] --> odd
+        logs["Field logs"] --> odd
+        odd --> validate{"verdy validate<br/>schema, then semantics"}
+        validate -->|"--strict: drafted parameters<br/>need approved: true"| approve["Human approval"]
+        odd -.->|"grounding.runtime"| runtime["On-robot source<br/>of each value"]
+        odd -.->|"odd_sha256"| report[("Evidence report")]
+    end
+    subgraph use ["Test within the ODD"]
+        direction LR
+        sample["Samplers draw scenarios<br/>conditioned on the constraints"] --> runs["Runs on a backend<br/>grounding.sim sets each value"]
+        runs --> coverage["Coverage<br/>per parameter and pairwise"]
+        coverage --> verdict{"Verdict<br/>safe enough<br/>within this ODD"}
+    end
+    author -->|"valid ODD"| use

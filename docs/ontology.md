@@ -29,24 +29,7 @@ The same flow as a diagram, including the loop back into the ontology and the ap
 log. Miss authoring also gets the reference files of the branches its misses fall in, and
 the log is what the Laya walker is fine-tuned on ([Laya fine-tuning](laya-finetuning.md)):
 
-```mermaid
-flowchart TD
-    subgraph truth ["Single source of truth"]
-        onto[("Ontology tree<br/>versioned YAML")] -->|"verdy ontology render"| skill["SKILL.md +<br/>references/branch.md"]
-    end
-    desc["Plain-language description"] --> extract["1. Claude extracts candidates<br/>phrase, unit, range"]
-    skill -.-> extract
-    extract --> shortlist["2. Embedding shortlist<br/>top-k entries"]
-    shortlist --> resolve{"3. Resolver<br/>exact, laya, laya-tree, llm"}
-    resolve -->|"match + probability"| matched["Parameter from the ontology<br/>source: ontology"]
-    resolve -->|"none + placement"| misses["4. Claude drafts only the misses<br/>new_ontology_entry: true"]
-    matched --> draft["Draft ODD<br/>resolution recorded per parameter"]
-    misses --> draft
-    draft --> human{"5. Human approves"}
-    human -->|"verdy ontology add"| onto
-    human -->|"verdy ontology log"| log[("Approval log<br/>phrase to leaf")]
-    human --> run["verdy run<br/>evidence report embeds the ODD"]
-```
+<p align="center"><img src="diagrams/odd-authoring.png" alt="ODD authoring with the ontology: extract, shortlist, resolve, draft only the misses, human approval feeding the ontology and the approval log" width="673"></p>
 
 1. **Extract.** Claude turns the description into candidate parameters, each with the
    phrase that mentions it, a type, a unit and a range. A classifier can't do this, because

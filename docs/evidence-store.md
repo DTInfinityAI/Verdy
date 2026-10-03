@@ -32,19 +32,7 @@ Policy home-navigator
 
 ## How it fits together
 
-```mermaid
-flowchart LR
-    run["verdy run --store"] --> report[("Signed evidence report<br/>source of truth, records each trace_sha256")]
-    run --> traces["Run traces"]
-    traces -->|"addressed by SHA-256"| store[("Trace store<br/>.verdy/store/batches/*.parquet")]
-    report -->|"digest checked, then indexed"| index[("DuckDB index<br/>star schema, index_v1.sql")]
-    others["Other reports<br/>*.report.json"] -->|"verdy index"| index
-    index --> history["verdy history<br/>verdicts per suite, regressions"]
-    index --> query["verdy query<br/>read-only SQL"]
-    history -->|"--fail-on-regression"| gate{"CI release gate"}
-    index -.->|"fact_rollout.trace_sha256"| store
-    report -.->|"verdy index --rebuild"| index
-```
+<p align="center"><img src="diagrams/evidence-store.png" alt="Evidence store: reports, content-addressed Parquet traces, DuckDB index, history and query" width="784"></p>
 
 Reports are written first and stay the source of truth. Traces go to the store under the
 hash each report records, and the index is derived from reports, so it can always be
@@ -187,80 +175,7 @@ A star schema. Dimensions identify *what* was tested; facts record *what happene
 | `fact_feedback` | preference pair (improvement loop) | `pair_id`, `run_a`, `run_b`, `choice`, `labeler`, `reason` |
 | `sources` | indexed report | `report_digest`, `report_path`, `kind`, `valid`, `signature_method` |
 
-```mermaid
-erDiagram
-    sources ||--o| fact_verdict : "report_digest"
-    dim_odd ||--o{ fact_verdict : "odd_key"
-    dim_policy ||--o{ fact_verdict : "policy_key"
-    dim_backend ||--o{ fact_verdict : "backend_key"
-    fact_verdict ||--o{ fact_rollout : "report_digest"
-    dim_scenario ||--o{ fact_rollout : "scenario_key"
-    fact_rollout ||--o{ fact_rollout_spec : "report_digest, run_id"
-    dim_spec ||--o{ fact_rollout_spec : "spec_key"
-    sources ||--o{ fact_feedback : "source_digest"
-    sources {
-        string report_digest PK
-        string report_path
-        string kind
-        boolean valid
-    }
-    fact_verdict {
-        string report_digest PK
-        string suite_key
-        string status
-        double p_fail
-        double p_lower
-        double p_upper
-        int n_runs
-        double coverage
-    }
-    fact_rollout {
-        string report_digest PK
-        string run_id PK
-        string scenario_key FK
-        boolean failed
-        double weight
-        double min_robustness
-        string trace_sha256
-    }
-    fact_rollout_spec {
-        string report_digest PK
-        string run_id PK
-        string spec_key PK
-        double robustness
-        boolean violated
-    }
-    fact_feedback {
-        string source_digest PK
-        string pair_id PK
-        string choice
-        string labeler
-    }
-    dim_odd {
-        string odd_key PK
-        string name
-        string version
-    }
-    dim_policy {
-        string policy_key PK
-        string name
-        string version
-    }
-    dim_spec {
-        string spec_key PK
-        string name
-        string severity
-    }
-    dim_backend {
-        string backend_key PK
-        string name
-    }
-    dim_scenario {
-        string scenario_key PK
-        string params_json
-        bigint seed
-    }
-```
+<p align="center"><img src="diagrams/index-schema.png" alt="Evidence index star schema: dimension and fact tables and their keys" width="784"></p>
 
 `dim_scenario` is shared: the same seeded scenario evaluated by two policy versions has
 one row, so paired comparisons across versions are a join away. Full DDL:

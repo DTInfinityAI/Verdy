@@ -11,21 +11,7 @@ the JSON Schema in [`verdy/spec/odd.schema.json`](../verdy/spec/odd.schema.json)
 
 ## Where an ODD fits
 
-```mermaid
-flowchart LR
-    human["Written by hand"] --> odd["ODD document<br/>odd.yaml"]
-    author["verdy author<br/>ontology-resolved draft"] --> odd
-    logs["Field logs"] --> odd
-    odd --> validate{"verdy validate<br/>schema, then semantics"}
-    validate -->|"--strict: drafted parameters<br/>need approved: true"| approve["Human approval"]
-    approve --> validate
-    validate -->|"valid"| sample["Samplers draw scenarios<br/>conditioned on the constraints"]
-    sample --> runs["Runs on a backend<br/>grounding.sim sets each value"]
-    runs --> coverage["Coverage<br/>per parameter and pairwise"]
-    coverage --> verdict{"Verdict<br/>safe enough within this ODD"}
-    odd -.->|"grounding.runtime"| monitor["On-robot source of each value<br/>e.g. a topic"]
-    odd -.->|"odd_sha256"| report[("Evidence report")]
-```
+<p align="center"><img src="diagrams/odd-lifecycle.png" alt="Where an ODD fits: authored, validated, sampled, run, covered, and the verdict stated within the ODD" width="784"></p>
 
 An ODD is written by hand, drafted with `verdy author`, or derived from logs. It is validated
 (strictly, drafted parameters need a human's approval), then every scenario is drawn from
@@ -36,51 +22,7 @@ embed the ODD and its digest.
 
 The structure, with the optional parts of each parameter:
 
-```mermaid
-classDiagram
-    direction LR
-    class ODD {
-        spec_version
-        name
-        version
-        description
-        constraints
-        metadata
-    }
-    class Parameter {
-        name
-        category
-        type
-        unit
-        range or values and weights
-        distribution
-        default
-    }
-    class Grounding {
-        sim
-        runtime
-    }
-    class Provenance {
-        source
-        confidence
-        approved
-        note
-        new_ontology_entry
-        ontology_parent
-    }
-    class Resolution {
-        resolver
-        decision
-        probability
-        phrase
-        path
-        placement
-    }
-    ODD "1" *-- "1..*" Parameter : parameters
-    Parameter "1" *-- "0..1" Grounding : grounding
-    Parameter "1" *-- "0..1" Provenance : provenance
-    Provenance "1" *-- "0..1" Resolution : resolution
-```
+<p align="center"><img src="diagrams/odd-structure.png" alt="ODD document structure: ODD with parameters, each with optional grounding and provenance, and provenance with resolution" width="784"></p>
 
 An ODD is a YAML or JSON document. Unknown fields are errors, so typos are caught.
 

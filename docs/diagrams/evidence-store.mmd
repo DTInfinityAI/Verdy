@@ -1,0 +1,15 @@
+flowchart TD
+    subgraph write ["Every verdy run --store"]
+        direction LR
+        run["verdy run --store"] --> report[("Signed evidence report<br/>source of truth,<br/>records each trace_sha256")]
+        run --> traces["Run traces"]
+        traces -->|"addressed by SHA-256"| store[("Trace store<br/>.verdy/store/batches/*.parquet")]
+    end
+    subgraph read ["Index and ask questions"]
+        direction LR
+        others["Other reports<br/>*.report.json"] -->|"verdy index"| index[("DuckDB index<br/>star schema, index_v1.sql<br/>rollouts point into the trace store")]
+        index --> history["verdy history<br/>verdicts per suite,<br/>regressions"]
+        index --> query["verdy query<br/>read-only SQL"]
+        history -->|"--fail-on-regression"| gate{"CI release gate"}
+    end
+    write -->|"digest checked, then indexed;<br/>verdy index --rebuild regenerates it"| read

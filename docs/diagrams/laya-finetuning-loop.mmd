@@ -1,0 +1,14 @@
+flowchart TD
+    approvals["Human approvals of drafted ODDs"] -->|"verdy ontology log"| log[("Approval log<br/>phrase to leaf")]
+    log <-->|"verdy ontology paraphrase"| syn["Synthetic paraphrases<br/>train only"]
+    log --> dataset["verdy laya dataset<br/>one example per tree level"]
+    tree[("Current ontology tree")] --> dataset
+    dataset --> train["train.jsonl"]
+    dataset --> held["heldout.jsonl<br/>human approvals only"]
+    train -->|"verdy laya items"| ft["Laya fine-tuning script<br/>RLCD + calibration"]
+    ft --> ckpt["Candidate checkpoint"]
+    ckpt --> gate{"verdy laya eval<br/>per-level accuracy + ECE vs current"}
+    held --> gate
+    gate -->|"PROMOTE"| walker["laya-tree resolver in verdy author"]
+    gate -->|"KEEP CURRENT"| current["Current checkpoint stays"]
+    walker -->|"new drafts"| approvals

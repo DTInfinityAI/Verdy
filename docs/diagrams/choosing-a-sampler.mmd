@@ -1,0 +1,8 @@
+flowchart TD
+    start{"What do you need<br/>from the runs?"} -->|"conditions the robot actually met"| replay["Log replay<br/>type: replay<br/>one scenario per recorded log"]
+    start -->|"an even spread over the ODD<br/>on a small budget"| strat["Stratified, Latin hypercube<br/>type: stratified<br/>each quantile stratum used once"]
+    start -->|"an unbiased failure rate<br/>at the nominal mix"| mc["Monte Carlo<br/>type: monte_carlo<br/>independent nominal draws"]
+    start -->|"rare failures,<br/>e.g. a target of 1% or less"| imp["Importance sampling<br/>type: importance<br/>adapts towards near-failures, weights every run"]
+    replay & strat & mc --> exact["Exact Clopper-Pearson bounds"]
+    imp --> approx["Weighted, approximate bounds<br/>check effective_n"]
+    exact & approx --> verdict{"Verdict"}

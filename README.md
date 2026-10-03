@@ -52,19 +52,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 
 ## How it works
 
-```mermaid
-flowchart LR
-    desc["Plain-language description"] -->|"verdy author"| odd["ODD spec<br/>odd/, spec/"]
-    onto[("Parameter ontology<br/>tree")] -.->|"names, units, bounds"| odd
-    odd --> sampler["Scenario sampler<br/>sampler/"]
-    sampler --> backend["Execution backend<br/>backends/"]
-    backend --> stl["STL scoring<br/>metrics/"]
-    stl --> verdict{"Statistical verdict<br/>PASS / FAIL / INCONCLUSIVE"}
-    verdict --> ledger[("Evidence ledger<br/>signed report")]
-    ledger --> store[("Evidence store<br/>Parquet + DuckDB")]
-    verdict -.->|"failures"| improve["Improvement loop<br/>improve/"]
-    improve -.->|"re-certify"| sampler
-```
+<p align="center"><img src="docs/diagrams/how-it-works.png" alt="Verdy's evaluation pipeline: description to ODD, sampler, backend, STL scoring, verdict, evidence ledger and store, with the improvement loop" width="826"></p>
 
 | Stage | What it does |
 | --- | --- |
@@ -169,24 +157,7 @@ parameters and an embedder shortlists matching entries from the
 [parameter ontology](docs/ontology.md). A resolver picks the matching entry, and Claude
 writes only the parameters the ontology doesn't have yet.
 
-```mermaid
-flowchart TD
-    subgraph truth ["Single source of truth"]
-        onto[("Ontology tree<br/>versioned YAML")] -->|"verdy ontology render"| skill["SKILL.md +<br/>references/branch.md"]
-    end
-    desc["Plain-language description"] --> extract["1. Claude extracts candidates<br/>phrase, unit, range"]
-    skill -.-> extract
-    extract --> shortlist["2. Embedding shortlist<br/>top-k entries"]
-    shortlist --> resolve{"3. Resolver<br/>exact, laya, laya-tree, llm"}
-    resolve -->|"match + probability"| matched["Parameter from the ontology<br/>source: ontology"]
-    resolve -->|"none + placement"| misses["4. Claude drafts only the misses<br/>new_ontology_entry: true"]
-    matched --> draft["Draft ODD<br/>resolution recorded per parameter"]
-    misses --> draft
-    draft --> human{"5. Human approves"}
-    human -->|"verdy ontology add"| onto
-    human -->|"verdy ontology log"| log[("Approval log<br/>phrase to leaf")]
-    human --> run["verdy run<br/>evidence report embeds the ODD"]
-```
+<p align="center"><img src="docs/diagrams/odd-authoring.png" alt="ODD authoring with the ontology: extract, shortlist, resolve, draft only the misses, human approval feeding the ontology and the approval log" width="673"></p>
 
 ### One source of truth: the ontology tree
 
@@ -427,22 +398,7 @@ The base Laya checkpoints are a fast base to specialise, not a zero-shot decisio
 The walker earns its place once it is fine-tuned on your approval history. Start logging
 approvals today, whatever resolver you use:
 
-```mermaid
-flowchart TD
-    approvals["Human approvals of drafted ODDs"] -->|"verdy ontology log"| log[("Approval log<br/>phrase to leaf")]
-    log <-->|"verdy ontology paraphrase"| syn["Synthetic paraphrases<br/>train only"]
-    log --> dataset["verdy laya dataset<br/>one example per tree level"]
-    tree[("Current ontology tree")] --> dataset
-    dataset --> train["train.jsonl"]
-    dataset --> held["heldout.jsonl<br/>human approvals only"]
-    train -->|"verdy laya items"| ft["Laya fine-tuning script<br/>RLCD + calibration"]
-    ft --> ckpt["Candidate checkpoint"]
-    ckpt --> gate{"verdy laya eval<br/>per-level accuracy + ECE vs current"}
-    held --> gate
-    gate -->|"PROMOTE"| walker["laya-tree resolver in verdy author"]
-    gate -->|"KEEP CURRENT"| current["Current checkpoint stays"]
-    walker -->|"new drafts"| approvals
-```
+<p align="center"><img src="docs/diagrams/laya-finetuning-loop.png" alt="Laya fine-tuning loop: approval log, per-level dataset, training, evaluation gate, promotion into the laya-tree resolver" width="430"></p>
 
 `verdy laya due` tells a scheduled job when enough new approvals have arrived to go round
 the loop again (every few hundred).
@@ -535,67 +491,9 @@ The ODD (Operational Design Domain) lists the conditions a policy must handle: t
 parameters that vary, their ranges and nominal distributions, and the combinations that
 can't occur. Every verdict is relative to it: `PASS` means safe enough *within this ODD*.
 
-```mermaid
-flowchart LR
-    human["Written by hand"] --> odd["ODD document<br/>odd.yaml"]
-    author["verdy author<br/>ontology-resolved draft"] --> odd
-    logs["Field logs"] --> odd
-    odd --> validate{"verdy validate<br/>schema, then semantics"}
-    validate -->|"--strict: drafted parameters<br/>need approved: true"| approve["Human approval"]
-    approve --> validate
-    validate -->|"valid"| sample["Samplers draw scenarios<br/>conditioned on the constraints"]
-    sample --> runs["Runs on a backend<br/>grounding.sim sets each value"]
-    runs --> coverage["Coverage<br/>per parameter and pairwise"]
-    coverage --> verdict{"Verdict<br/>safe enough within this ODD"}
-    odd -.->|"grounding.runtime"| monitor["On-robot source of each value<br/>e.g. a topic"]
-    odd -.->|"odd_sha256"| report[("Evidence report")]
-```
+<p align="center"><img src="docs/diagrams/odd-lifecycle.png" alt="Where an ODD fits: authored, validated, sampled, run, covered, and the verdict stated within the ODD" width="880"></p>
 
-```mermaid
-classDiagram
-    direction LR
-    class ODD {
-        spec_version
-        name
-        version
-        description
-        constraints
-        metadata
-    }
-    class Parameter {
-        name
-        category
-        type
-        unit
-        range or values and weights
-        distribution
-        default
-    }
-    class Grounding {
-        sim
-        runtime
-    }
-    class Provenance {
-        source
-        confidence
-        approved
-        note
-        new_ontology_entry
-        ontology_parent
-    }
-    class Resolution {
-        resolver
-        decision
-        probability
-        phrase
-        path
-        placement
-    }
-    ODD "1" *-- "1..*" Parameter : parameters
-    Parameter "1" *-- "0..1" Grounding : grounding
-    Parameter "1" *-- "0..1" Provenance : provenance
-    Provenance "1" *-- "0..1" Resolution : resolution
-```
+<p align="center"><img src="docs/diagrams/odd-structure.png" alt="ODD document structure: ODD with parameters, each with optional grounding and provenance, and provenance with resolution" width="784"></p>
 
 Validate with `verdy validate odd.yaml` (`--strict` also requires every drafted parameter to
 be approved). The full format: [docs/odd-spec.md](docs/odd-spec.md).
@@ -608,16 +506,7 @@ A sampler turns the ODD into concrete scenarios. Every sampler is deterministic 
 seed, and every scenario satisfies the ODD's constraints. Pick one by what you need from
 the runs:
 
-```mermaid
-flowchart TD
-    start{"What do you need<br/>from the runs?"} -->|"conditions the robot actually met"| replay["Log replay<br/>type: replay<br/>one scenario per recorded log"]
-    start -->|"an even spread over the ODD<br/>on a small budget"| strat["Stratified, Latin hypercube<br/>type: stratified<br/>each quantile stratum used once"]
-    start -->|"an unbiased failure rate<br/>at the nominal mix"| mc["Monte Carlo<br/>type: monte_carlo<br/>independent nominal draws"]
-    start -->|"rare failures,<br/>e.g. a target of 1% or less"| imp["Importance sampling<br/>type: importance<br/>adapts towards near-failures, weights every run"]
-    replay & strat & mc --> exact["Exact Clopper-Pearson bounds"]
-    imp --> approx["Weighted, approximate bounds<br/>check effective_n"]
-    exact & approx --> verdict{"Verdict"}
-```
+<p align="center"><img src="docs/diagrams/choosing-a-sampler.png" alt="Choosing a sampler: log replay, stratified, Monte Carlo or importance sampling, and the bounds each gives" width="822"></p>
 
 ```bash
 verdy sample odd.yaml -n 10 --sampler stratified     # preview scenarios
@@ -637,25 +526,7 @@ by which the trace satisfied it (positive) or violated it (negative). For exampl
 `speed <= 0.3` has robustness `0.3 - speed`, `always` takes the minimum over time and
 `eventually` the maximum.
 
-```mermaid
-flowchart TD
-    rollout["Backend rollout"] --> trace["Trace<br/>time + one list per signal"]
-    trace --> check{"validate_trace<br/>uniform time, every signal present?"}
-    check -->|"no, or the run crashed"| error["Errored run<br/>counts as a failure by default"]
-    check -->|"yes"| rtamt["RTAMT scores every spec<br/>robustness = signed margin"]
-    specs[("specs.yaml<br/>STL formulas + severity")] --> rtamt
-    rtamt --> per["Per-spec robustness<br/>e.g. no_collision +0.42, slow_near_person -0.05"]
-    per --> viol{"robustness < 0<br/>or NaN?"}
-    viol -->|"yes"| violated["Spec violated<br/>recorded per spec"]
-    viol -->|"no"| ok["Spec satisfied<br/>with that margin to spare"]
-    violated --> sev{"Severity in fail_on?<br/>default critical, major"}
-    sev -->|"yes"| failed["Run fails<br/>counts toward the verdict"]
-    sev -->|"no"| logged["Reported per spec only"]
-    per --> minrob["Lowest robustness over the deciding specs"]
-    minrob -.-> sampler["Importance sampler<br/>refits towards near-failures"]
-    minrob -.-> reward["Improvement loop<br/>safety-margin reward"]
-    per -->|"with the trace's SHA-256"| report[("Evidence report<br/>trace digest + robustness per spec")]
-```
+<p align="center"><img src="docs/diagrams/stl-scoring.png" alt="STL scoring: trace validation, robustness per spec, violation, severity and run failure" width="880"></p>
 
 ```yaml
 specs:
@@ -682,19 +553,7 @@ Verdy computes one-sided bounds `L` and `U` on the failure probability:
 | `FAIL` | `L > max_failure_prob` | Fails more often than allowed, with the stated confidence. |
 | `INCONCLUSIVE` | otherwise | Not enough evidence yet: run more scenarios or cover more of the ODD. |
 
-```mermaid
-flowchart TD
-    runs["Scored runs<br/>a run fails if a spec in fail_on is violated;<br/>crashed runs count as failures by default"] --> est["Failure-probability estimate<br/>one-sided bounds L and U at confidence"]
-    est --> enough{"At least<br/>min_runs runs?"}
-    enough -->|"no"| inc1["INCONCLUSIVE<br/>run more scenarios"]
-    enough -->|"yes"| failq{"L > max_failure_prob?"}
-    failq -->|"yes"| fail["FAIL<br/>fails more often than allowed"]
-    failq -->|"no"| passq{"U <= max_failure_prob?"}
-    passq -->|"no"| inc2["INCONCLUSIVE<br/>not enough evidence yet"]
-    passq -->|"yes"| covq{"ODD coverage >= min_coverage?"}
-    covq -->|"no"| inc3["INCONCLUSIVE<br/>cover more of the ODD"]
-    covq -->|"yes"| pass["PASS<br/>fails at most max_failure_prob of the time"]
-```
+<p align="center"><img src="docs/diagrams/verdict-rule.png" alt="Verdict rule: minimum runs, then FAIL, INCONCLUSIVE or PASS from the bounds and coverage" width="698"></p>
 
 Details, assumptions and limits: [docs/verdicts.md](docs/verdicts.md).
 
@@ -705,17 +564,7 @@ Details, assumptions and limits: [docs/verdicts.md](docs/verdicts.md).
 The specs a policy is certified against also run on the robot, flagging violations as they
 happen:
 
-```mermaid
-flowchart LR
-    specs[("specs.yaml<br/>the specs the policy was tested against")] --> check{"Monitorable<br/>online?"}
-    check -->|"always(f) becomes historically(f)"| monitor["RuntimeMonitor<br/>past-time STL with RTAMT"]
-    check -->|"explicit monitor: formula"| monitor
-    check -->|"needs the future, e.g. reach the goal within 20 s"| skipped["Skipped and listed<br/>skip_unmonitorable=True"]
-    robot["Robot signals<br/>one sample every dt seconds"] -->|"monitor.update(sample)"| monitor
-    monitor --> status{"MonitorStatus<br/>robustness per spec"}
-    status -->|"ok: next sample"| robot
-    status -->|"violated, latched for the episode"| stop["Safe stop<br/>reason: status.violated"]
-```
+<p align="center"><img src="docs/diagrams/runtime-monitors.png" alt="Runtime monitors: monitorable specs, the per-sample monitoring loop and safe stop" width="880"></p>
 
 ```python
 from verdy.metrics import load_specs
@@ -741,22 +590,7 @@ Every Verdy test shows where a policy is fragile, by how much it nearly failed, 
 which conditions. `verdy improve` turns that into a closed loop: **test, find
 weaknesses, train on them, re-certify.**
 
-```mermaid
-flowchart TD
-    demos["Expert demonstrations<br/>recorded operator sessions"] -->|"pretrain (behavior cloning)"| policy
-    policy["Incumbent policy"] --> diagnose["1. Diagnose<br/>test on a fresh ODD sample, keep traces"]
-    diagnose --> reward["2. Reward<br/>safety margins + bounded preference reward"]
-    operators(["Operators compare pairs of runs"]) --> feedback
-    reward --> feedback["3. Human feedback (RLHF)<br/>most informative pairs, Bradley-Terry reward model"]
-    feedback --> target["4. Target<br/>failure map + curriculum near failures"]
-    target --> train["5. Train<br/>pluggable trainer: built-in search, TRL, SB3, LeRobot, any command"]
-    train --> candidate["Candidate policy"]
-    candidate --> certify{"6. Re-certify on held-out seeds<br/>candidate vs incumbent"}
-    policy --> certify
-    certify -->|"no worse, guards hold: promote"| policy
-    certify -.->|"worse or a guard regressed: keep incumbent"| policy
-    certify --> report[("Signed loop report<br/>final certified verdict")]
-```
+<p align="center"><img src="docs/diagrams/improvement-loop.png" alt="Improvement loop: diagnose, reward, human feedback, target, train, re-certify and promote" width="746"></p>
 
 | What it does | How |
 | --- | --- |
@@ -802,20 +636,7 @@ the file labeler and record real sessions. The full guide is
 scenes (Drake model directives) from text prompts. Verdy can generate a scene for every
 sampled scenario, run your policy in it, and have SceneSmith's validator judge the task.
 
-```mermaid
-flowchart TD
-    sampler["Sampled scenario<br/>room_type, clutter, lighting, ..."] --> prompt["1. Prompt writer<br/>Claude (ANTHROPIC_API_KEY) or a template"]
-    prompt --> cache{"Scene already in<br/>.verdy/scenesmith/?"}
-    cache -->|"no"| generate["2. SceneSmith main.py generates it<br/>own .venv, OPENAI_API_KEY"]
-    cache -->|"yes"| scene
-    generate --> scene["Scene<br/>.dmd.yaml + object state"]
-    scene --> policy["3. Your policy<br/>run(scene, output_dmd, seed)"]
-    policy --> final["Final scene<br/>objects where the robot left them"]
-    final --> validate["4. SceneSmith validator judges the task<br/>OPENAI_API_KEY"]
-    validate --> trace["Trace signals<br/>task_score, task_success, requirements_met"]
-    trace --> verdict{"STL specs and verdict"}
-    verdict --> report[("Evidence report<br/>prompts, key fingerprints, redacted logs")]
-```
+<p align="center"><img src="docs/diagrams/scenesmith-pipeline.png" alt="SceneSmith pipeline: prompt, scene generation, policy, validator, trace signals and verdict" width="880"></p>
 
 Verdy and SceneSmith run in separate Python environments. Keys come from environment
 variables or a private secrets file, each SceneSmith subprocess gets only the keys listed
@@ -905,19 +726,7 @@ every run's trace as Parquet in a content-addressed store, addressed by the hash
 report already records and batched many traces per file (3,000 runs: 3 files, 7.5 MB),
 and builds a local DuckDB index from reports that can always be rebuilt from them. That makes questions across releases one command:
 
-```mermaid
-flowchart LR
-    run["verdy run --store"] --> report[("Signed evidence report<br/>source of truth, records each trace_sha256")]
-    run --> traces["Run traces"]
-    traces -->|"addressed by SHA-256"| store[("Trace store<br/>.verdy/store/batches/*.parquet")]
-    report -->|"digest checked, then indexed"| index[("DuckDB index<br/>star schema, index_v1.sql")]
-    others["Other reports<br/>*.report.json"] -->|"verdy index"| index
-    index --> history["verdy history<br/>verdicts per suite, regressions"]
-    index --> query["verdy query<br/>read-only SQL"]
-    history -->|"--fail-on-regression"| gate{"CI release gate"}
-    index -.->|"fact_rollout.trace_sha256"| store
-    report -.->|"verdy index --rebuild"| index
-```
+<p align="center"><img src="docs/diagrams/evidence-store.png" alt="Evidence store: reports, content-addressed Parquet traces, DuckDB index, history and query" width="880"></p>
 
 ```bash
 cd examples/home_robot
@@ -978,22 +787,7 @@ per-spec robustness, feedback), versioned in `verdy/spec/index_v1.sql`. Query it
 Set keys as environment variables, or in `~/.config/verdy/secrets.env` (`chmod 600`), and
 check them with `verdy secrets status`:
 
-```mermaid
-flowchart LR
-    env["Environment variables<br/>CI and cloud secret stores"] -->|"take precedence"| lookup{"Secret lookup<br/>by name only"}
-    file[("~/.config/verdy/secrets.env<br/>chmod 600, outside every repo")] --> lookup
-    config["Run config"] -->|"secret names"| lookup
-    config -.->|"holds a key-shaped value"| reject["Rejected before anything runs"]
-    lookup --> secret["Secret object<br/>prints as name, source, fingerprint"]
-    secret -->|"value handed over"| claude["Claude client<br/>ANTHROPIC_API_KEY"]
-    secret -->|"minimal env: listed keys only"| scenesmith["SceneSmith subprocess<br/>OPENAI_API_KEY, GOOGLE_API_KEY"]
-    secret -->|"HMAC key"| sign["Report signing<br/>VERDY_SIGNING_KEY"]
-    secret -->|"one-way hash"| fp["Fingerprint<br/>sha256, hmac or none"]
-    fp --> report[("Evidence report<br/>fingerprints, never keys")]
-    claude & scenesmith --> redact["Redactor<br/>removes loaded keys and key-shaped strings"]
-    redact --> out["Logs, errors, stored output"]
-    scan["verdy secrets scan"] -.->|"exit 1 on a committed key"| ci{"CI"}
-```
+<p align="center"><img src="docs/diagrams/secrets-flow.png" alt="Secrets flow: keys from environment or a private file, used only by the clients that need them, fingerprinted and redacted" width="880"></p>
 
 | Secret | Used for |
 | --- | --- |

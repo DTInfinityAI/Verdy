@@ -1,0 +1,43 @@
+classDiagram
+    direction LR
+    class ODD {
+        spec_version
+        name
+        version
+        description
+        constraints
+        metadata
+    }
+    class Parameter {
+        name
+        category
+        type
+        unit
+        range or values and weights
+        distribution
+        default
+    }
+    class Grounding {
+        sim
+        runtime
+    }
+    class Provenance {
+        source
+        confidence
+        approved
+        note
+        new_ontology_entry
+        ontology_parent
+    }
+    class Resolution {
+        resolver
+        decision
+        probability
+        phrase
+        path
+        placement
+    }
+    ODD "1" *-- "1..*" Parameter : parameters
+    Parameter "1" *-- "0..1" Grounding : grounding
+    Parameter "1" *-- "0..1" Provenance : provenance
+    Provenance "1" *-- "0..1" Resolution : resolution
