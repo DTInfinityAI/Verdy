@@ -182,6 +182,58 @@ verdy ontology list core                          # print the tree
   outgrows it, `verdy ontology regroup` has Claude propose intermediate groups. They are
   written as `status: draft` for a human to approve.
 
+### Regrouping a crowded node
+
+Say `water` in your ontology has grown to 17 children. `validate` fails, and `regroup`
+asks Claude for intermediate groups (`pip install -e ".[llm]"`, uses the
+`ANTHROPIC_API_KEY` secret):
+
+```console
+$ verdy ontology validate subsea.yaml
+subsea.yaml: error: water: 17 children, limit 15; add an intermediate group so Laya keeps
+room for 'none' among its options (verdy ontology regroup proposes some)
+$ verdy ontology regroup subsea.yaml water -o subsea.regrouped.yaml
+water: 3 new draft groups (5 children now)
+  + water_optical (Optical): turbidity, light_attenuation, secchi_depth, colour, ...
+  + water_motion (Motion): current_speed, wave_height, swell_period, surge, ...
+  + water_chemistry (Chemistry): salinity, dissolved_oxygen, ph
+  why: separates how light, movement and composition of the water affect the robot
+Wrote subsea.regrouped.yaml. Review the groups marked status: draft, then set status:
+approved (or edit them), and re-render the skill.
+```
+
+(Illustrative output: the groups Claude proposes depend on your ontology.)
+
+Verdy checks the proposal and sends any problems back to Claude to fix:
+- a taken or invalid id;
+- a child in two groups;
+- a group with fewer than 2 or more than 15 children;
+- the node still over the limit.
+
+The output file has the new groups with their members moved under them:
+
+```yaml
+- id: water_optical
+  parent: water
+  label: Optical
+  definition: How well light travels through the water.
+  status: draft            # set to approved after review
+- id: turbidity
+  parent: water_optical    # was: water
+  ...
+```
+
+Review the diff, then approve the groups and re-render the skill:
+
+```bash
+verdy ontology validate subsea.regrouped.yaml      # lists the draft groups until approved
+verdy ontology render subsea.regrouped.yaml -o .claude/skills/ontology-subsea
+```
+
+Leave out the node name to regroup every node over the limit. Omit `-o` to update the
+file in place. The approval log is unaffected: it stores phrase → leaf, so Laya's training
+data is simply rebuilt from the new tree.
+
 ### Shortlisting with sentence-transformers
 
 The default `hashing` embedder only matches shared words. To match paraphrases, use a
