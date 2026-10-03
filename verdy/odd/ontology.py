@@ -324,7 +324,8 @@ class Ontology:
                 where = parent or "<roots>"
                 errors.append(
                     f"{where}: {len(kids)} children, limit {limit}; add an intermediate group "
-                    "so Laya keeps room for 'none' among its options")
+                    "so Laya keeps room for 'none' among its options (verdy ontology regroup "
+                    "proposes some)")
         for g in self.groups:
             if not self._children.get(g.name):
                 warnings.append(f"{g.name}: group has no children")

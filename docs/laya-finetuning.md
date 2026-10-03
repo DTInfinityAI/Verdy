@@ -222,8 +222,9 @@ new checkpoint only when step 7 says `PROMOTE`.
 
 - Run `verdy ontology validate` in CI. Every node needs 15 children or fewer, so that `none`
   fits in Laya's option budget.
-- When a node outgrows the limit, add an intermediate group, have a human approve it, and
-  re-export. The log stores phrase → leaf, so nothing is lost.
+- When a node outgrows the limit, `verdy ontology regroup ONTOLOGY -o OUT` has Claude
+  propose intermediate groups, which are written as `status: draft`. Have a human approve
+  them, then re-export. The log stores phrase → leaf, so nothing is lost.
 - Give groups short, distinct definitions. Options are shown as `id: label: ~10 words`.
 - Laya can follow boolean-sounding option labels (`yes`, `no`, `true`) instead of their
   descriptions, so keep node ids semantic.

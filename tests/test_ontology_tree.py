@@ -535,3 +535,92 @@ def test_cli_eval_gate(tmp_path, monkeypatch, capsys):
     assert main(["laya", "eval", str(held), "--checkpoint", "english",
                  "--baseline", "./laya_verdy"]) == 1
     assert "KEEP CURRENT" in capsys.readouterr().out
+
+
+# --- regrouping ----------------------------------------------------------------------------
+
+
+def crowded_tree():
+    return Ontology.from_dict(tree(
+        [{"id": "environment"}, {"id": "water", "parent": "environment"}]
+        + [leaf(f"optical_{i}", "water") for i in range(9)]
+        + [leaf(f"flow_{i}", "water") for i in range(6)]
+        + [leaf("salinity", "water"), leaf("depth", "water")]))
+
+
+def regroup_client(*proposals):
+    client = SimpleNamespace(calls=[], queue=list(proposals))
+
+    def create(**kw):
+        client.calls.append(kw)
+        text = json.dumps(client.queue.pop(0))
+        return SimpleNamespace(stop_reason="end_turn",
+                               content=[SimpleNamespace(type="text", text=text)])
+
+    client.beta = SimpleNamespace(messages=SimpleNamespace(create=create))
+    return client
+
+
+GOOD_GROUPS = {"rationale": "optical vs motion", "groups": [
+    {"id": "water_optical", "label": "Optical", "definition": "Light through water.",
+     "children": [f"optical_{i}" for i in range(9)]},
+    {"id": "water_motion", "label": "Motion", "definition": "Moving water.",
+     "children": [f"flow_{i}" for i in range(6)]},
+]}
+
+
+def test_regroup_proposal_applied_as_drafts():
+    from verdy.odd.regroup import apply_proposal, over_limit, propose_groups
+
+    onto = crowded_tree()
+    assert over_limit(onto) == ["water"]
+    bad = {"rationale": "", "groups": [
+        {"id": "water", "label": "x", "definition": "x", "children": ["optical_0"]},
+        {"id": "g2", "label": "y", "definition": "y", "children": ["optical_0", "nope"]}]}
+    client = regroup_client(bad, GOOD_GROUPS)
+    proposal = propose_groups(onto, "water", client=client)
+    feedback = client.calls[1]["messages"][-1]["content"]
+    for problem in ["'water' is already taken", "has 1 children", "'nope' is not a child",
+                    "'optical_0' is in both", "would still have"]:
+        assert problem in feedback
+    assert "optical_0: Optical 0" in client.calls[0]["messages"][0]["content"]
+
+    new = apply_proposal(onto, proposal)
+    assert [n.name for n in new.children("water")] == [
+        "water_optical", "water_motion", "salinity", "depth"]
+    assert new.node("water_optical").status == "draft"
+    assert new.path("optical_3") == ["environment", "water", "water_optical", "optical_3"]
+    assert new.check()[0] == [] and "draft nodes" in new.check()[1][0]
+    assert len(onto.children("water")) == 17  # the original is untouched
+    # the approval log survives: examples are regenerated from the new tree
+    ex, _ = level_examples(new, Approval("murky", "optical_3"))
+    assert [e.gold for e in ex] == ["environment", "water", "water_optical", "optical_3"]
+
+
+def test_regroup_gives_up_and_rejects_non_groups():
+    from verdy.odd.regroup import propose_groups
+
+    onto = crowded_tree()
+    bad = {"rationale": "", "groups": []}
+    with pytest.raises(ValueError, match="no valid grouping"):
+        propose_groups(onto, "water", client=regroup_client(bad, bad), max_attempts=2)
+    with pytest.raises(ValueError, match="not a group"):
+        propose_groups(onto, "salinity", client=regroup_client())
+
+
+def test_cli_regroup(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "o.yaml"
+    save_ontology(crowded_tree(), path)
+    assert main(["ontology", "validate", str(path)]) == 1
+    assert "verdy ontology regroup" in capsys.readouterr().out
+    monkeypatch.setattr("verdy.llm.claude_client", lambda *a, **k: regroup_client(GOOD_GROUPS))
+    out = tmp_path / "regrouped.yaml"
+    assert main(["ontology", "regroup", str(path), "-o", str(out)]) == 0
+    text = capsys.readouterr().out
+    assert "water: 2 new draft groups (4 children now)" in text
+    assert "+ water_optical (Optical): optical_0" in text
+    assert main(["ontology", "validate", str(out)]) == 0
+    assert "2 draft nodes" in capsys.readouterr().out
+    assert main(["ontology", "regroup", str(out)]) == 0
+    assert "nothing to regroup" in capsys.readouterr().out
+    assert main(["ontology", "regroup", "core"]) == 2

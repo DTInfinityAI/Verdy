@@ -168,6 +168,34 @@ fewer, so 15 leaves room for `none`. When a node outgrows the limit, add an inte
 group (for example, split `water` into `water_optical`, `water_motion` and `water_site`) and
 have a human approve it.
 
+Claude can propose those groups:
+
+```console
+$ verdy ontology regroup subsea.yaml -o subsea.regrouped.yaml   # every node over the limit
+$ verdy ontology regroup subsea.yaml water -o subsea.regrouped.yaml
+water: 3 new draft groups (5 children now)
+  + water_optical (Optical): turbidity, light_attenuation, secchi_depth, ...
+  + water_motion (Motion): current_speed, wave_height, swell_period, ...
+  + water_chemistry (Chemistry): salinity, dissolved_oxygen, ph
+  why: ...
+Wrote subsea.regrouped.yaml. Review the groups marked status: draft, ...
+```
+
+Claude groups the children by what the quantities physically are, gives each new group a
+snake_case id, a label and a one-line definition, and puts each child in at most one group.
+Verdy checks the proposal and sends any problems back to Claude for a retry. A proposal is
+rejected if:
+- a new group's id is taken or isn't snake_case;
+- a child belongs to two groups;
+- a group has fewer than 2 or more than 15 children;
+- the node would still be over the limit.
+
+The new groups are written as `status: draft`, with their members moved under them, into the
+output file (or in place with no `-o`). Review the diff, edit or delete groups, and set
+`status: approved`, then re-render the skill. `validate` lists draft nodes until then.
+Regrouping doesn't invalidate the approval log: it stores phrase → leaf, and Laya training
+examples are regenerated from the new tree.
+
 ```console
 $ verdy ontology validate subsea.yaml       # exits 1 on any error, for CI
 subsea.yaml: error: water: 17 children, limit 15; add an intermediate group so Laya keeps

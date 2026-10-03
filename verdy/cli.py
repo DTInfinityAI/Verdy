@@ -503,6 +503,34 @@ def cmd_ontology_paraphrase(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ontology_regroup(args: argparse.Namespace) -> int:
+    from verdy.odd.ontology import BUNDLED, load_ontology, save_ontology
+    from verdy.odd.regroup import apply_proposal, over_limit, propose_groups
+
+    if args.ontology in BUNDLED and not args.output:
+        return _err(f"{args.ontology} is bundled with Verdy; write the regrouped copy with -o FILE")
+    onto = load_ontology(args.ontology)
+    nodes = args.nodes or over_limit(onto, args.max_children)
+    if not nodes:
+        print(f"{onto.ref}: no node has more than "
+              f"{args.max_children or onto.max_children} children; nothing to regroup.")
+        return 0
+    for node in nodes:
+        proposal = propose_groups(onto, node, model=args.model, max_children=args.max_children)
+        onto = apply_proposal(onto, proposal)
+        print(f"{node}: {len(proposal.groups)} new draft groups "
+              f"({len(onto.children(node))} children now)")
+        for g in proposal.groups:
+            print(f"  + {g.id} ({g.label}): {', '.join(g.children)}")
+        if proposal.rationale:
+            print(f"  why: {proposal.rationale}")
+    output = args.output or args.ontology
+    save_ontology(onto, output)
+    print(f"Wrote {output}. Review the groups marked status: draft, then set status: approved "
+          "(or edit them), and re-render the skill.")
+    return 0
+
+
 def cmd_laya_dataset(args: argparse.Namespace) -> int:
     from verdy.finetune.dataset import export_dataset
     from verdy.odd.approvals import log_sha256, read_approvals
@@ -771,6 +799,16 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--log", default=str(DEFAULT_APPROVAL_LOG), help="approval log (JSON Lines)")
     q.add_argument("--no-log", action="store_true", help="don't log approvals")
     q.set_defaults(func=cmd_ontology_add)
+    q = onto_sub.add_parser(
+        "regroup", help="have Claude propose intermediate groups for nodes over the limit")
+    q.add_argument("ontology", help="ontology file (or core with -o)")
+    q.add_argument("nodes", nargs="*", metavar="NODE",
+                   help="groups to regroup (default: every group over the limit)")
+    q.add_argument("-o", "--output", help="write here instead of updating the ontology")
+    q.add_argument("--max-children", type=int,
+                   help="override the ontology's max_children (default 15)")
+    q.add_argument("--model", default="claude-opus-5-5")
+    q.set_defaults(func=cmd_ontology_regroup)
     q = onto_sub.add_parser("paraphrase",
                             help="add synthetic LLM paraphrases of approved phrases to the log")
     q.add_argument("--log", default=str(DEFAULT_APPROVAL_LOG))

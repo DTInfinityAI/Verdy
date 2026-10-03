@@ -15,6 +15,7 @@ $ verdy --help
 | `verdy ontology list [ONTOLOGY]` | Print the tree of a bundled ontology (default `core`) or an ontology file. |
 | `verdy ontology validate ONTOLOGY... [--max-children N]` | Check structure and the children-per-node limit (default 15); exits 1 on any error. |
 | `verdy ontology render ONTOLOGY -o DIR [--check]` | Render `SKILL.md` and `references/<branch>.md`. `--check` exits 1 if `DIR` is stale (for CI). |
+| `verdy ontology regroup ONTOLOGY [NODE...] [-o OUT]` | Claude proposes intermediate groups for nodes over the limit (default: all of them); written as `status: draft` groups for a human to approve. Needs `verdy[llm]`. |
 | `verdy ontology log ODD [--ontology O] [--log FILE]` | Append the ODD's approved resolutions to the approval log (phrase → leaf; default `.verdy/ontology/approvals.jsonl`). |
 | `verdy ontology add ODD --ontology FILE [-o OUT] [--no-log]` | Log approvals, then add the ODD's approved `new_ontology_entry` parameters under their `ontology_parent`. |
 | `verdy ontology paraphrase [-n 3] [--log FILE]` | Add synthetic Claude paraphrases of approved phrases to the log (`source: synthetic`). |

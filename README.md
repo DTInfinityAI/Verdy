@@ -179,7 +179,8 @@ verdy ontology list core                          # print the tree
   stale. Its digest is recorded in each drafted ODD, so the evidence report pins what the
   LLM was told. See [`skills/ontology-core/`](skills/ontology-core/SKILL.md).
 - **The 15-children rule** leaves room for "none" within Laya's option budget. When a node
-  outgrows it, add an intermediate group, and have a human approve it.
+  outgrows it, `verdy ontology regroup` has Claude propose intermediate groups. They are
+  written as `status: draft` for a human to approve.
 
 ### Shortlisting with sentence-transformers
 
@@ -502,6 +503,7 @@ per-spec robustness, feedback), versioned in `verdy/spec/index_v1.sql`. Query it
 | `verdy plan --max-failure-prob 0.01` | Runs needed to demonstrate a target |
 | `verdy author "description" [--resolver laya]` | Draft an ODD: Claude extracts, the ontology resolver matches, Claude writes only new entries |
 | `verdy ontology list` / `validate` / `render` | Show the ontology tree / check it (15 children per node) / render its LLM skill |
+| `verdy ontology regroup ontology.yaml -o out.yaml` | Claude proposes intermediate groups for nodes over 15 children, as drafts for a human to approve |
 | `verdy ontology log` / `add` / `paraphrase` | Log approvals as phrase → leaf / also add approved new entries / add synthetic paraphrases |
 | `verdy laya dataset` / `items` / `eval` / `due` | Fine-tune the Laya tree walker: export data, tokenize, gate promotion, schedule retraining |
 | `verdy improve improve.yaml` | Run the closed improvement loop: test, train, re-certify |

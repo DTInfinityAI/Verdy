@@ -15,6 +15,11 @@ All notable changes to Verdy are listed here. The format follows
   still load.
 - `verdy ontology validate` enforces at most 15 children per node (`max_children`), which
   leaves room for "none" in Laya's option budget. CI runs it on the core ontology.
+- `verdy ontology regroup`: when a node has more than 15 children, Claude proposes
+  intermediate groups. Verdy validates the proposal and sends problems back for a retry
+  (taken ids, a child in two groups, groups of fewer than 2 or more than 15 children, still
+  over the limit). It then writes the groups as `status: draft`, with their members moved
+  under them, for a human to approve.
 - `verdy ontology render` generates an LLM skill from the ontology: `SKILL.md` (naming
   conventions, units, distributions, grounding, branches, worked examples) and
   `references/<branch>.md`. The rendered core skill is committed in
