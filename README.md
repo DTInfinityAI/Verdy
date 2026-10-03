@@ -607,6 +607,25 @@ the file labeler and record real sessions. The full guide is
 scenes (Drake model directives) from text prompts. Verdy can generate a scene for every
 sampled scenario, run your policy in it, and have SceneSmith's validator judge the task.
 
+```mermaid
+flowchart TD
+    sampler["Sampled scenario<br/>room_type, clutter, lighting, ..."] --> prompt["1. Prompt writer<br/>Claude (ANTHROPIC_API_KEY) or a template"]
+    prompt --> cache{"Scene already in<br/>.verdy/scenesmith/?"}
+    cache -->|"no"| generate["2. SceneSmith main.py generates it<br/>own .venv, OPENAI_API_KEY"]
+    cache -->|"yes"| scene
+    generate --> scene["Scene<br/>.dmd.yaml + object state"]
+    scene --> policy["3. Your policy<br/>run(scene, output_dmd, seed)"]
+    policy --> final["Final scene<br/>objects where the robot left them"]
+    final --> validate["4. SceneSmith validator judges the task<br/>OPENAI_API_KEY"]
+    validate --> trace["Trace signals<br/>task_score, task_success, requirements_met"]
+    trace --> verdict{"STL specs and verdict"}
+    verdict --> report[("Evidence report<br/>prompts, key fingerprints, redacted logs")]
+```
+
+Verdy and SceneSmith run in separate Python environments. Keys come from environment
+variables or a private secrets file, each SceneSmith subprocess gets only the keys listed
+for it, and its output is redacted before it is logged. The steps below set this up.
+
 **1. Install SceneSmith** (Linux with an NVIDIA GPU; SceneSmith pins Python 3.11 and its
 own dependencies, separate from Verdy's):
 
