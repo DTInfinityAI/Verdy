@@ -31,6 +31,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [Key features](#key-features)
 - [Drafting an ODD](#drafting-an-odd)
   - [Training Laya on your approvals](#training-laya-on-your-approvals)
+- [ODD spec](#odd-spec)
 - [Scenario sampling](#scenario-sampling)
 - [STL scoring](#stl-scoring)
 - [Verdicts](#verdicts)
@@ -525,6 +526,79 @@ log everything, and switch to `laya-tree` once it beats the LLM on held-out appr
 
 The full walkthrough covers hardware, the training script, the promotion rules and
 scheduling: [docs/laya-finetuning.md](docs/laya-finetuning.md).
+
+---
+
+## ODD spec
+
+The ODD (Operational Design Domain) lists the conditions a policy must handle: the
+parameters that vary, their ranges and nominal distributions, and the combinations that
+can't occur. Every verdict is relative to it: `PASS` means safe enough *within this ODD*.
+
+```mermaid
+flowchart LR
+    human["Written by hand"] --> odd["ODD document<br/>odd.yaml"]
+    author["verdy author<br/>ontology-resolved draft"] --> odd
+    logs["Field logs"] --> odd
+    odd --> validate{"verdy validate<br/>schema, then semantics"}
+    validate -->|"--strict: drafted parameters<br/>need approved: true"| approve["Human approval"]
+    approve --> validate
+    validate -->|"valid"| sample["Samplers draw scenarios<br/>conditioned on the constraints"]
+    sample --> runs["Runs on a backend<br/>grounding.sim sets each value"]
+    runs --> coverage["Coverage<br/>per parameter and pairwise"]
+    coverage --> verdict{"Verdict<br/>safe enough within this ODD"}
+    odd -.->|"grounding.runtime"| monitor["On-robot source of each value<br/>e.g. a topic"]
+    odd -.->|"odd_sha256"| report[("Evidence report")]
+```
+
+```mermaid
+classDiagram
+    direction LR
+    class ODD {
+        spec_version
+        name
+        version
+        description
+        constraints
+        metadata
+    }
+    class Parameter {
+        name
+        category
+        type
+        unit
+        range or values and weights
+        distribution
+        default
+    }
+    class Grounding {
+        sim
+        runtime
+    }
+    class Provenance {
+        source
+        confidence
+        approved
+        note
+        new_ontology_entry
+        ontology_parent
+    }
+    class Resolution {
+        resolver
+        decision
+        probability
+        phrase
+        path
+        placement
+    }
+    ODD "1" *-- "1..*" Parameter : parameters
+    Parameter "1" *-- "0..1" Grounding : grounding
+    Parameter "1" *-- "0..1" Provenance : provenance
+    Provenance "1" *-- "0..1" Resolution : resolution
+```
+
+Validate with `verdy validate odd.yaml` (`--strict` also requires every drafted parameter to
+be approved). The full format: [docs/odd-spec.md](docs/odd-spec.md).
 
 ---
 
