@@ -29,6 +29,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [Quick start](#quick-start)
 - [Example](#example)
 - [Key features](#key-features)
+- [Drafting an ODD](#drafting-an-odd)
 - [Verdicts](#verdicts)
 - [Improvement loop](#improvement-loop)
 - [SceneSmith setup](#scenesmith-setup)
@@ -147,6 +148,38 @@ Report digest: 0acc9e2b...
 | **Human feedback (RLHF)** | Operators compare pairs of runs; a reward model learns what they value. Expert sessions pretrain the policy. |
 | **Evidence store and history** | Traces as content-addressed Parquet, a DuckDB index rebuilt from signed reports, and `verdy history` to track verdicts and catch regressions across policy releases. |
 | **Safe credentials** | API keys come from environment variables or a private secrets file, never configs. Reports store only hashed fingerprints, and logs, errors and reports are redacted. Subprocesses get only the keys they need. |
+
+---
+
+## Drafting an ODD
+
+`verdy author` drafts an ODD from a plain-language description. Claude extracts candidate
+parameters and an embedder shortlists matching entries from the
+[parameter ontology](docs/ontology.md). A resolver picks the matching entry, and Claude
+writes only the parameters the ontology doesn't have yet.
+
+The default `hashing` embedder only matches shared words. To match paraphrases, use a
+local [sentence-transformers](https://www.sbert.net/) model instead:
+
+```bash
+pip install -e ".[llm]" sentence-transformers
+verdy author "ROV inspection in murky water near the jacket legs, with a strong current" \
+  --embedder sentence-transformers:all-MiniLM-L6-v2 --top-k 20 -o odd.draft.yaml
+```
+
+Omit `:MODEL` to use the default `all-MiniLM-L6-v2`. The model runs locally and needs no
+API key; it downloads from Hugging Face on first use. Add `--resolver laya` (with
+`pip install -e ".[laya]"`) to resolve the shortlist with Laya locally too. From Python:
+
+```python
+from verdy.odd.authoring import draft_odd
+
+odd = draft_odd(description, ontology="core", resolver="laya",
+                embedder="sentence-transformers:all-MiniLM-L6-v2", top_k=20)
+```
+
+Each parameter records the embedder, its shortlist and the resolver's decision in its
+provenance. Review the draft and set `provenance.approved: true` on what you accept.
 
 ---
 
