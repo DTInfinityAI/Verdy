@@ -32,6 +32,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [Drafting an ODD](#drafting-an-odd)
   - [Training Laya on your approvals](#training-laya-on-your-approvals)
 - [Scenario sampling](#scenario-sampling)
+- [STL scoring](#stl-scoring)
 - [Verdicts](#verdicts)
 - [Runtime monitors](#runtime-monitors)
 - [Improvement loop](#improvement-loop)
@@ -551,6 +552,48 @@ verdy sample odd.yaml -n 10 --sampler stratified     # preview scenarios
 Importance sampling refits its proposal after every batch from the runs that came closest
 to failing, and weights each run so the failure rate is still estimated under the nominal
 ODD. Details: [docs/sampling.md](docs/sampling.md).
+
+---
+
+## STL scoring
+
+Every run is scored against Signal Temporal Logic specs with
+[RTAMT](https://github.com/nickovic/rtamt). Each spec gets a **robustness**: a signed margin
+by which the trace satisfied it (positive) or violated it (negative). For example,
+`speed <= 0.3` has robustness `0.3 - speed`, `always` takes the minimum over time and
+`eventually` the maximum.
+
+```mermaid
+flowchart TD
+    rollout["Backend rollout"] --> trace["Trace<br/>time + one list per signal"]
+    trace --> check{"validate_trace<br/>uniform time, every signal present?"}
+    check -->|"no, or the run crashed"| error["Errored run<br/>counts as a failure by default"]
+    check -->|"yes"| rtamt["RTAMT scores every spec<br/>robustness = signed margin"]
+    specs[("specs.yaml<br/>STL formulas + severity")] --> rtamt
+    rtamt --> per["Per-spec robustness<br/>e.g. no_collision +0.42, slow_near_person -0.05"]
+    per --> viol{"robustness < 0<br/>or NaN?"}
+    viol -->|"yes"| violated["Spec violated<br/>recorded per spec"]
+    viol -->|"no"| ok["Spec satisfied<br/>with that margin to spare"]
+    violated --> sev{"Severity in fail_on?<br/>default critical, major"}
+    sev -->|"yes"| failed["Run fails<br/>counts toward the verdict"]
+    sev -->|"no"| logged["Reported per spec only"]
+    per --> minrob["Lowest robustness over the deciding specs"]
+    minrob -.-> sampler["Importance sampler<br/>refits towards near-failures"]
+    minrob -.-> reward["Improvement loop<br/>safety-margin reward"]
+    per -->|"with the trace's SHA-256"| report[("Evidence report<br/>trace digest + robustness per spec")]
+```
+
+```yaml
+specs:
+  - name: no_collision
+    severity: critical
+    formula: always(dist_obstacle >= 0.0)
+  - name: slow_near_person
+    severity: major
+    formula: always((dist_obstacle <= 0.5) implies (speed <= 0.3))
+```
+
+Guide: [docs/stl-specs.md](docs/stl-specs.md).
 
 ---
 
