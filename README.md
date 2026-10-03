@@ -315,9 +315,81 @@ about ten words) or "none":
   needed, and it belongs under `water_optical`. That placement goes to Claude, which drafts
   the entry in the right place.
 
-```bash
-verdy author "ROV inspection in murky water near the jacket legs, with a strong current" \
-  --resolver laya-tree --resolver-option checkpoint=./laya_verdy -o odd.draft.yaml
+#### Example
+
+With a checkpoint fine-tuned on your approvals (see the next section):
+
+```console
+$ verdy author "ROV inspection in murky water near the jacket legs, with a strong current" \
+    --resolver laya-tree --resolver-option checkpoint=./laya_verdy -o odd.draft.yaml
+Draft ODD with 3 parameters written to odd.draft.yaml.
+Resolved against core@0.2.0 with the laya-tree resolver: 2 matched, 1 new.
+  'murky water'                    -> turbidity  (p=0.82)
+  'strong current'                 -> current_speed  (p=0.77)
+  'near the jacket legs'           -> jacket_leg_clearance  NEW ONTOLOGY ENTRY (p=0.50)
+Review every parameter, then set provenance.approved: true on the ones you accept.
+```
+
+(Illustrative output: the probabilities come from your checkpoint.)
+
+This is how "murky water" was resolved. One Laya question is asked per level, each over
+that node's children plus "none":
+
+| Level | Options | Chosen | p | Path p |
+| --- | --- | --- | --- | --- |
+| 1 | environment, platform, task, sensors, faults, none | `environment` | 0.97 | 0.97 |
+| 2 | light, weather, water, terrain, space, people, none | `water` | 0.95 | 0.92 |
+| 3 | water_optical, water_motion, water_site, none | `water_optical` | 0.93 | 0.86 |
+| 4 | turbidity, none | `turbidity` | 0.96 | **0.82** |
+
+"Near the jacket legs" went `task` (0.62), then "none" (0.81): no task parameter fits. Claude
+drafts `jacket_leg_clearance` under `task` and records it as `ontology_parent: task`, so
+`verdy ontology add` files it there after approval.
+
+**The beam at work.** For an ambiguous phrase such as "2 m visibility", level 1 might give
+`environment` 0.52 and `sensors` 0.41. Those are within `beam_margin` (0.2) of each other,
+so both branches are walked:
+- `environment → weather → fog_visibility` ends at 0.52 × 0.9 × 0.88 = 0.41;
+- `sensors → perception → sensor_range` ends at 0.41 × 0.95 × 0.9 = 0.35.
+
+The more probable complete path wins, rather than whichever branch looked best first. Both
+values are under the default `--min-probability` of 0.5, so the best guess,
+`fog_visibility`, is recorded as `proposed` and the phrase is treated as a new entry for a
+human to look at. Lower the threshold to accept it.
+
+Each parameter records the walk in its provenance, and evidence reports embed it:
+
+```yaml
+provenance:
+  source: ontology
+  confidence: 0.82
+  approved: false
+  resolution:
+    resolver: laya-tree
+    model: laya:./laya_verdy
+    decision: turbidity
+    probability: 0.82
+    candidate: water_clarity
+    phrase: murky water
+    path:
+      - {node: environment, p: 0.97}
+      - {node: water, p: 0.95}
+      - {node: water_optical, p: 0.93}
+      - {node: turbidity, p: 0.96}
+    ontology: core@0.2.0
+```
+
+Tune the walk with `--resolver-option beam_width=3 --resolver-option beam_margin=0.1`.
+From Python:
+
+```python
+from verdy.odd.authoring import draft_odd
+from verdy.odd.resolve import LayaTreeResolver
+
+odd = draft_odd(description, ontology="my-ontology.yaml",
+                resolver=LayaTreeResolver(checkpoint="./laya_verdy", beam_width=2,
+                                          beam_margin=0.2, min_probability=0.5))
+print(odd["turbidity"].provenance["resolution"]["path"])
 ```
 
 ### Training Laya on your approvals
