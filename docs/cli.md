@@ -11,15 +11,17 @@ $ verdy --help
 | `verdy run CONFIG` | Run an evaluation and write the evidence report. |
 | `verdy verify REPORT [--key-env VAR \| --public-key PEM]` | Check a report's digest, and its signature if a key is given. |
 | `verdy plan --max-failure-prob P [--confidence C]` | Number of failure-free runs needed to show failure probability ≤ P. |
-| `verdy author "DESCRIPTION" [-o odd.draft.yaml] [--resolver exact\|laya\|llm\|module:attr] [--ontology core\|FILE\|none]` | Draft an ODD: Claude extracts candidate parameters, a resolver matches them to the ontology, Claude writes only the new entries (`pip install "verdy[llm]"`, uses the `ANTHROPIC_API_KEY` secret). See [ontology and resolvers](ontology.md) for every option. |
-| `verdy ontology list [ONTOLOGY]` | Entries of a bundled ontology (default `core`) or an ontology file. |
-| `verdy ontology add ODD --ontology FILE [-o OUT]` | Add the ODD's approved `new_ontology_entry` parameters to an ontology. |
-| `verdy improve LOOP_CONFIG [--cycles N] [--sign hmac\|ed25519]` | Run the closed improvement loop: diagnose, collect feedback, train, re-certify on held-out scenarios. Exits with the final certified verdict. See [improvement loop](improvement-loop.md). |
-| `verdy index [PATHS...] [--rebuild] [--store PATH]` | Index evidence reports (default: every `*.report.json` under `.`) into the store. `--rebuild` regenerates the index from all known reports. |
-| `verdy history [POLICY] [--by-spec] [--json] [--fail-on-regression]` | Verdicts of a policy across versions, grouped by test suite, with regressions flagged. Without a policy, lists indexed policies. See [evidence store](evidence-store.md). |
-| `verdy query "SQL" [--json]` | Run a read-only SQL query on the evidence index. |
-| `verdy store stats [--store PATH]` | Traces, batch files and size of the trace store. |
-| `verdy store compact [--store PATH] [--batch-size N] [--keep]` | Pack single-file traces (Verdy 0.4) into batch files, verifying each one. |
+| `verdy author "DESCRIPTION" [-o odd.draft.yaml] [--resolver exact\|laya\|laya-tree\|llm\|module:attr] [--ontology core\|FILE\|none]` | Draft an ODD: Claude extracts candidate parameters, a resolver matches them to the ontology, Claude writes only the new entries (`pip install "verdy[llm]"`, uses the `ANTHROPIC_API_KEY` secret). See [ontology and resolvers](ontology.md) for every option. |
+| `verdy ontology list [ONTOLOGY]` | Print the tree of a bundled ontology (default `core`) or an ontology file. |
+| `verdy ontology validate ONTOLOGY... [--max-children N]` | Check structure and the children-per-node limit (default 15); exits 1 on any error. |
+| `verdy ontology render ONTOLOGY -o DIR [--check]` | Render `SKILL.md` and `references/<branch>.md`. `--check` exits 1 if `DIR` is stale (for CI). |
+| `verdy ontology log ODD [--ontology O] [--log FILE]` | Append the ODD's approved resolutions to the approval log (phrase → leaf; default `.verdy/ontology/approvals.jsonl`). |
+| `verdy ontology add ODD --ontology FILE [-o OUT] [--no-log]` | Log approvals, then add the ODD's approved `new_ontology_entry` parameters under their `ontology_parent`. |
+| `verdy ontology paraphrase [-n 3] [--log FILE]` | Add synthetic Claude paraphrases of approved phrases to the log (`source: synthetic`). |
+| `verdy laya dataset [--ontology O] [--log FILE] [-o DIR] [--holdout 0.2]` | Per-level Laya training rows (`train.jsonl`), held-out human approvals (`heldout.jsonl`) and `manifest.json`. |
+| `verdy laya items TRAIN --model-dir DIR [-o train_items.pt]` | Tokenize training rows for Laya's fine-tuning script (needs `verdy[laya]`). |
+| `verdy laya eval HELDOUT --checkpoint C [--baseline B] [-o report.json]` | Per-level accuracy and calibration. With `--baseline`, exits 0 only if the checkpoint should be promoted. |
+| `verdy laya due [--manifest M] [--every 300]` | Exits 0 when enough new human approvals have accumulated to retrain. |
 | `verdy secrets status [NAME...] [--fingerprint sha256\|hmac\|none]` | Which secrets are set and where from, with fingerprints. Never prints values. |
 | `verdy secrets scan PATH...` | Find credential-shaped strings in files; exits 1 if any are found. |
 | `verdy schema {odd,stl_specs,ontology}` | Print a bundled JSON Schema. |

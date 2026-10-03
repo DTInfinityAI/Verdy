@@ -1,4 +1,4 @@
-# ODD specification (v0.3.0)
+# ODD specification (v0.4.0)
 
 An **Operational Design Domain** (ODD) describes the conditions a robot policy is expected
 to operate in. Verdy samples test scenarios from it, measures how much of it a test
@@ -7,7 +7,7 @@ campaign covered, and states every verdict relative to it: a `PASS` means "safe 
 
 This document is the normative description of ODD documents. The machine-readable form is
 the JSON Schema in [`verdy/spec/odd.schema.json`](../verdy/spec/odd.schema.json)
-(`$id: https://dti.ai/verdy/spec/odd/0.3.0`); print it with `verdy schema odd`.
+(`$id: https://dti.ai/verdy/spec/odd/0.4.0`); print it with `verdy schema odd`.
 
 ## Document format
 
@@ -15,7 +15,7 @@ An ODD is a YAML or JSON document. Unknown fields are errors, so typos are caugh
 
 | Field | Type | Required | Description |
 | --- | --- | :---: | --- |
-| `spec_version` | string | | Meta-schema version the document targets, e.g. `0.3.0`. |
+| `spec_version` | string | | Meta-schema version the document targets, e.g. `0.4.0`. |
 | `name` | string | ✅ | Name of the domain. |
 | `version` | string | ✅ | Version of this ODD. Bump it whenever the domain changes. |
 | `description` | string | | What the domain covers, in plain language. |
@@ -114,6 +114,9 @@ against a parameter ontology first (see [ontology and resolvers](ontology.md)):
   the description), `proposed` (a rejected choice), `reason`, `ontology` (`name@version`),
   `embedder` and the top of the `shortlist` with scores.
 - `also_mentioned_as` lists other phrases that resolved to the same parameter.
+- With the `laya-tree` resolver, `resolution.path` lists the node and probability chosen at
+  each level, and a miss has `resolution.placement`, the group below which Laya answered
+  none. A new entry's `ontology_parent` is the group it is proposed under.
 
 Every drafted parameter starts with `approved: false`. Unapproved `llm` and `ontology`
 parameters are warnings in normal validation and errors with `verdy validate --strict`, so a
@@ -133,7 +136,7 @@ ODD.
 ## Example
 
 ```yaml
-spec_version: 0.3.0
+spec_version: 0.4.0
 name: home-robot-kitchen-crossing
 version: 0.1.0
 parameters:
@@ -163,7 +166,8 @@ The complete version is [`examples/home_robot/odd.yaml`](../examples/home_robot/
 ## Versioning
 
 The meta-schema follows semantic versioning. While it is `0.x`, minor versions may make
-breaking changes. Changes from `0.2.0` (additive; every `0.2.0` document is valid `0.3.0`):
+breaking changes. Changes from `0.3.0` (additive): provenance `ontology_parent`, and
+`resolution.path` and `resolution.placement` from the tree walker. Changes from `0.2.0` (additive; every `0.2.0` document is valid `0.3.0`):
 provenance `source: ontology`, `resolution`, `new_ontology_entry` and `also_mentioned_as`.
 Changes from `0.1.0`: added `spec_version`, `description`, `metadata`,
 parameter `description`, `weights`, `default` and `provenance.note`; unknown fields are

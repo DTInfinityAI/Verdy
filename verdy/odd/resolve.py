@@ -18,6 +18,11 @@ Built-in resolvers:
     `Laya <https://github.com/NandhaKishorM/laya>`_, an open-weight non-autoregressive
     decision model, run locally (no API key): one typed ``choice`` question per candidate
     whose options are the shortlist plus ``none``. ``pip install "verdy[laya]"``.
+``laya-tree``
+    Laya walks the ontology tree level by level (children plus ``none`` at each level),
+    keeping the two best branches when they are close. The probability is the product along
+    the path. "none" below a branch tells the miss-authoring step where a new entry belongs.
+    Use it with a checkpoint fine-tuned on your approvals (:mod:`verdy.finetune`).
 ``llm``
     Claude resolves all candidates in one structured-output call.
 
@@ -85,6 +90,8 @@ class Resolution:
     model: str | None = None
     reason: str = ""
     proposed: str | None = None  # resolver's top choice when it fell below the threshold
+    path: list[dict[str, Any]] = field(default_factory=list)  # tree walk: [{node, p}]
+    placement: str | None = None  # group where a new entry belongs (a "none" below it)
 
     @property
     def matched(self) -> bool:
@@ -105,10 +112,16 @@ class Resolution:
         out["candidate"] = self.candidate.name
         if self.candidate.phrase:
             out["phrase"] = self.candidate.phrase
+        if self.candidate.unit:
+            out["unit"] = self.candidate.unit
         if self.proposed:
             out["proposed"] = self.proposed
         if self.reason:
             out["reason"] = self.reason
+        if self.path:
+            out["path"] = [dict(step) for step in self.path]
+        if self.placement:
+            out["placement"] = self.placement
         if ontology is not None:
             out["ontology"] = ontology.ref
         if embedder:
@@ -128,6 +141,11 @@ class Resolver(ABC):
         if not 0.0 <= min_probability <= 1.0:
             raise ValueError("min_probability must be in [0, 1]")
         self.min_probability = min_probability
+        self.ontology: Ontology | None = None
+
+    def bind(self, ontology: Ontology) -> None:
+        """Called by authoring with the ontology being resolved against."""
+        self.ontology = ontology
 
     @abstractmethod
     def resolve(self, candidate: Candidate, options: list[Scored],
@@ -180,6 +198,28 @@ LAYA_INSTRUCTIONS = (
 )
 LAYA_NONE_TEXT = "none of these: a different quantity that needs a new entry"
 _LAYA_OPTION_CHARS = 160
+
+
+LAYA_CHECKPOINTS = ("english", "multilingual", "typed-decisions")
+
+
+def laya_predictor(checkpoint: str | None = None, router: Any = None,
+                   **router_options: Any) -> Any:
+    """An object with Laya's ``predict(state, questions, ...)`` contract.
+
+    ``router`` is used as is. Otherwise a checkpoint name (``english``, ``multilingual``,
+    ``typed-decisions``) or none goes through ``laya.Router``, and anything else (a local
+    fine-tuned directory or a Hub repo id) is loaded with ``laya.load``.
+    """
+    if router is not None:
+        return router
+    try:
+        import laya
+    except ImportError as exc:
+        raise ImportError('the laya resolvers need Laya: pip install "verdy[laya]"') from exc
+    if checkpoint is None or checkpoint in LAYA_CHECKPOINTS:
+        return laya.Router(**router_options)
+    return laya.load(checkpoint, **router_options)
 
 
 class LayaResolver(Resolver):
@@ -235,6 +275,112 @@ class LayaResolver(Resolver):
             return self._decide(candidate, options, None,
                                 None if p is None else float(p), reason)
         return self._decide(candidate, options, label, None if p is None else float(p))
+
+
+class LayaTreeResolver(Resolver):
+    """Laya walks the ontology tree: one ``choice`` among a node's children plus ``none`` per
+    level, from the roots down to a leaf.
+
+    Beam search, not greedy descent: at each level the runner-up branch is kept too when its
+    probability is within ``beam_margin`` of the best, and at most ``beam_width`` paths are
+    expanded (all of a level's questions go to Laya in one call). A path's probability is the
+    product of its steps. The most probable finished path wins: a leaf is a match; "none"
+    below a group is a miss whose ``placement`` is that group, so the new entry is drafted in
+    the right place.
+
+    ``checkpoint`` is a Laya checkpoint name, a local fine-tuned directory or a Hub repo id;
+    see :func:`laya_predictor`. The question format comes from :mod:`verdy.odd.levels`, the
+    same one the fine-tuning data uses.
+    """
+
+    name = "laya-tree"
+
+    def __init__(self, min_probability: float = DEFAULT_MIN_PROBABILITY, *,
+                 checkpoint: str | None = None, router: Any = None, beam_width: int = 2,
+                 beam_margin: float = 0.2, **router_options: Any):
+        super().__init__(min_probability)
+        if beam_width < 1:
+            raise ValueError("beam_width must be at least 1")
+        if not 0.0 <= beam_margin <= 1.0:
+            raise ValueError("beam_margin must be in [0, 1]")
+        self.checkpoint = checkpoint
+        self.beam_width = beam_width
+        self.beam_margin = beam_margin
+        self._predictor = router
+        self._router_options = router_options
+        if router is None:
+            try:
+                import laya  # noqa: F401
+            except ImportError as exc:
+                raise ImportError(
+                    'the laya-tree resolver needs Laya: pip install "verdy[laya]"') from exc
+
+    @property
+    def predictor(self) -> Any:
+        if self._predictor is None:
+            self._predictor = laya_predictor(self.checkpoint, **self._router_options)
+        return self._predictor
+
+    def _ask(self, state: dict[str, Any], nodes: list[str | None]) -> list[dict[str, float]]:
+        from verdy.odd.levels import QUESTION_ID, level_options, level_question
+
+        assert self.ontology is not None
+        questions = {f"{QUESTION_ID}{i}": level_question(level_options(self.ontology, n))
+                     for i, n in enumerate(nodes)}
+        kwargs = {"model": self.checkpoint} if self.checkpoint in LAYA_CHECKPOINTS else {}
+        result = self.predictor.predict(state, questions, **kwargs)
+        routed = (result.get("routing") or {}).get("model") or self.checkpoint
+        self.model = f"laya:{routed}" if routed else "laya"
+        out = []
+        for qid in questions:
+            answer = result["answers"][qid]
+            probs = {k: float(v) for k, v in (answer.get("probabilities") or {}).items()}
+            out.append(probs or {answer["choice"]: float(answer.get("answer_confidence", 1.0))})
+        return out
+
+    def resolve(self, candidate: Candidate, options: list[Scored],
+                context: str) -> Resolution:
+        from verdy.odd.levels import phrase_state
+
+        if self.ontology is None:
+            raise ValueError("the laya-tree resolver needs an ontology: call bind() first")
+        onto = self.ontology
+        state = phrase_state(candidate.phrase or candidate.name, candidate.name, candidate.unit)
+        # A path is (node it stands at, probability, steps). Finished paths end at a leaf
+        # (match) or at "none" below a group (miss placed in that group).
+        frontier: list[tuple[str | None, float, list[dict[str, Any]]]] = [(None, 1.0, [])]
+        done: list[tuple[float, OntologyEntry | None, str | None, list[dict[str, Any]]]] = []
+        while frontier:
+            dists = self._ask(state, [node for node, _, _ in frontier])
+            expanded = []
+            for (node, prob, steps), probs in zip(frontier, dists, strict=True):
+                ranked = sorted(probs.items(), key=lambda kv: (-kv[1], kv[0]))
+                keep = ranked[:1] + [kv for kv in ranked[1:self.beam_width]
+                                     if ranked[0][1] - kv[1] <= self.beam_margin]
+                for label, p in keep:
+                    path = steps + [{"node": label, "p": round(p, 4)}]
+                    if label == NONE_LABEL or not onto.has_node(label):
+                        done.append((prob * p, None, node, path))
+                        continue
+                    child = onto.node(label)
+                    if isinstance(child, OntologyEntry):
+                        done.append((prob * p, child, None, path))
+                    else:
+                        expanded.append((label, prob * p, path))
+            best_done = max((d[0] for d in done), default=0.0)
+            expanded.sort(key=lambda t: -t[1])
+            # Products only shrink further down, so a path below the best finished one loses.
+            frontier = [t for t in expanded[:self.beam_width] if t[1] > best_done]
+        prob, leaf, placement, path = max(done, key=lambda d: d[0])
+        proposed, reason = None, ""
+        if leaf is not None and prob < self.min_probability:
+            proposed, placement, leaf = leaf.name, leaf.parent, None
+            reason = f"path probability below min_probability {self.min_probability}"
+        elif leaf is None:
+            reason = f"none below {placement}" if placement else "none of the root branches"
+        return Resolution(candidate=candidate, entry=leaf, probability=prob,
+                          resolver=self.name, shortlist=list(options), model=self.model,
+                          reason=reason, proposed=proposed, path=path, placement=placement)
 
 
 LLM_SYSTEM_PROMPT = """\
@@ -325,6 +471,7 @@ class LLMResolver(Resolver):
 RESOLVERS: dict[str, type[Resolver]] = {
     "exact": ExactResolver,
     "laya": LayaResolver,
+    "laya-tree": LayaTreeResolver,
     "llm": LLMResolver,
 }
 

@@ -245,7 +245,9 @@ NEW_ENTRY_PROMPT = SYSTEM_PROMPT + """
 You are only writing the parameters that the team's parameter ontology does not have yet; \
 each becomes a proposed new ontology entry, so make the definition reusable beyond this \
 ODD. Write exactly one parameter per candidate, set candidate to the candidate's name, and \
-keep that name unless the user says it is taken."""
+keep that name unless the user says it is taken. Set parent to the id of the ontology group \
+the new parameter belongs under (from the ontology reference below); when the user gives a \
+placement, use it."""
 
 NEW_ENTRIES_SCHEMA = {
     "type": "object",
@@ -254,8 +256,9 @@ NEW_ENTRIES_SCHEMA = {
             "type": "array",
             "items": {
                 **_PARAM_SCHEMA,
-                "properties": {"candidate": {"type": "string"}, **_PARAM_SCHEMA["properties"]},
-                "required": ["candidate", *_PARAM_SCHEMA["required"]],
+                "properties": {"candidate": {"type": "string"}, "parent": {"type": "string"},
+                               **_PARAM_SCHEMA["properties"]},
+                "required": ["candidate", "parent", *_PARAM_SCHEMA["required"]],
             },
         },
     },
@@ -266,16 +269,20 @@ NEW_ENTRIES_SCHEMA = {
 
 def extract_candidates(
     description: str, *, client: Any, model: str = DEFAULT_MODEL, effort: str = "high",
+    skill: str = "",
 ) -> tuple[dict[str, Any], list[Candidate]]:
     """Step 1: Claude turns the description into candidate parameters with ranges.
 
-    Returns the raw draft (name, description, constraints) and the candidates.
+    ``skill`` is the rendered ontology skill (:func:`verdy.odd.skill.skill_prompt`), so
+    candidate names follow the ontology's conventions. Returns the raw draft (name,
+    description, constraints) and the candidates.
     """
     from verdy.odd.resolve import Candidate
 
+    system = EXTRACT_PROMPT + (f"\n\nThe team's parameter ontology:\n\n{skill}" if skill else "")
     try:
         draft, _ = create_json(
-            client, system=EXTRACT_PROMPT,
+            client, system=system,
             messages=[{"role": "user", "content": f"Operating conditions:\n\n{description}"}],
             schema=EXTRACT_SCHEMA, model=model, effort=effort,
         )
@@ -375,15 +382,17 @@ def _draft_with_ontology(
     from verdy.odd.ontology import Ontology, load_ontology
     from verdy.odd.resolve import make_resolver
     from verdy.odd.shortlist import DEFAULT_TOP_K, Shortlister, embedder_name
+    from verdy.odd.skill import render_skill, skill_prompt, skill_sha256
 
     onto = ontology if isinstance(ontology, Ontology) else load_ontology(ontology)
     res = make_resolver(resolver, **(resolver_options or {}))
+    res.bind(onto)
     shortlister = Shortlister(onto, embedder, top_k or DEFAULT_TOP_K)
     embed_label = embedder_name(shortlister.embed)
 
-    # 1. LLM extracts candidates.
+    # 1. LLM extracts candidates, with the ontology's skill (conventions and branches).
     draft, candidates = extract_candidates(description, client=client, model=model,
-                                           effort=effort)
+                                           effort=effort, skill=skill_prompt(onto))
     if not candidates:
         raise AuthoringError("no parameters found in the description")
 
@@ -416,7 +425,7 @@ def _draft_with_ontology(
 
     # 4. LLM authors only the misses.
     new_params = _author_misses(
-        description, misses, taken=set(by_entry) | {e.name for e in onto.entries},
+        description, misses, taken=set(by_entry) | {n.name for n in onto.nodes},
         client=client, model=model, effort=effort, max_attempts=max_attempts,
         ontology=onto, embedder=embed_label, matched=params,
     )
@@ -447,7 +456,7 @@ def _draft_with_ontology(
     authoring: dict[str, Any] = {
         "ontology": onto.ref, "resolver": res.name, "embedder": embed_label,
         "top_k": shortlister.k, "matched": len(params) - len(new_params),
-        "new_entries": len(new_params),
+        "new_entries": len(new_params), "skill_sha256": skill_sha256(render_skill(onto)),
     }
     if dropped:
         authoring["dropped_constraints"] = dropped
@@ -458,16 +467,37 @@ def _draft_with_ontology(
     return ODD.from_dict(doc)
 
 
+def _new_entry_parent(ontology: Ontology, proposed: str | None, category: str) -> str | None:
+    """The group a new entry goes under: the proposal if it is a group in the parameter's
+    category, else the category root (if the ontology has it)."""
+    if proposed and ontology.is_group(proposed) and ontology.path(proposed)[0] == category:
+        return proposed
+    return category if ontology.has_node(category) else None
+
+
 def _author_misses(
     description: str, misses: list[Resolution], *, taken: set[str], client: Any, model: str,
     effort: str, max_attempts: int, ontology: Ontology, embedder: str,
     matched: list[dict[str, Any]],
 ) -> list[tuple[Resolution, dict[str, Any]]]:
     """Step 4: Claude writes full definitions for candidates the ontology lacks."""
+    from verdy.odd.skill import skill_prompt
+
     if not misses:
         return []
-    payload = [{"candidate": m.candidate.name, **m.candidate.to_state(),
-                "category": m.candidate.category} for m in misses]
+    payload = []
+    branches = []
+    for m in misses:
+        item = {"candidate": m.candidate.name, **m.candidate.to_state(),
+                "category": m.candidate.category}
+        if m.placement and ontology.has_node(m.placement):
+            item["placement"] = " → ".join(ontology.path(m.placement))
+            branches.append(ontology.path(m.placement)[0])
+        elif ontology.has_node(m.candidate.category):
+            branches.append(m.candidate.category)
+        payload.append(item)
+    system = (NEW_ENTRY_PROMPT + "\n\nThe team's parameter ontology:\n\n"
+              + skill_prompt(ontology, branches))
     messages: list[dict[str, Any]] = [{
         "role": "user",
         "content": (f"Operating conditions:\n\n{description}\n\nThe ontology has no entry for "
@@ -480,7 +510,7 @@ def _author_misses(
     for _ in range(max_attempts):
         try:
             data, response = create_json(
-                client, system=NEW_ENTRY_PROMPT, messages=messages, schema=NEW_ENTRIES_SCHEMA,
+                client, system=system, messages=messages, schema=NEW_ENTRIES_SCHEMA,
                 model=model, effort=effort,
             )
         except LLMError as exc:
@@ -496,6 +526,10 @@ def _author_misses(
                 errors.append(f"{p['candidate']}: name {doc_param['name']!r} is already taken")
             used.add(doc_param["name"])
             doc_param["provenance"]["new_ontology_entry"] = True
+            parent = _new_entry_parent(ontology, miss.placement or p.get("parent"),
+                                       doc_param["category"])
+            if parent:
+                doc_param["provenance"]["ontology_parent"] = parent
             doc_param["provenance"]["resolution"] = miss.to_provenance(ontology, embedder)
             out.append((miss, doc_param))
         missing = [m.candidate.name for m in misses if not any(r is m for r, _ in out)]

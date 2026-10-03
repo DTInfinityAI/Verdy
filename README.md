@@ -30,6 +30,7 @@ is re-certified on scenarios it never trained on, so improvement is proven, not 
 - [Example](#example)
 - [Key features](#key-features)
 - [Drafting an ODD](#drafting-an-odd)
+  - [Training Laya on your approvals](#training-laya-on-your-approvals)
 - [Verdicts](#verdicts)
 - [Improvement loop](#improvement-loop)
 - [SceneSmith setup](#scenesmith-setup)
@@ -158,6 +159,28 @@ parameters and an embedder shortlists matching entries from the
 [parameter ontology](docs/ontology.md). A resolver picks the matching entry, and Claude
 writes only the parameters the ontology doesn't have yet.
 
+### One source of truth: the ontology tree
+
+The ontology is a versioned YAML tree. Every node has an id, a label, a one-line definition,
+aliases, a parent and a status (`draft` or `approved`). Leaves are ODD parameters, with
+units, physical bounds, a distribution and grounding (the simulator parameter and runtime
+signal they map to). An example path is `environment → water → water_optical → turbidity`.
+Everything else is generated from this tree:
+
+```bash
+verdy ontology validate core                      # structure; at most 15 children per node
+verdy ontology render core -o skills/ontology-core  # SKILL.md + references/<branch>.md
+verdy ontology list core                          # print the tree
+```
+
+- **The rendered skill** gives the LLM the naming conventions, unit rules, top-level
+  branches and worked examples (`SKILL.md`), plus one reference file per branch, loaded
+  only when extraction touches that branch. Nobody edits it by hand, and CI fails if it is
+  stale. Its digest is recorded in each drafted ODD, so the evidence report pins what the
+  LLM was told. See [`skills/ontology-core/`](skills/ontology-core/SKILL.md).
+- **The 15-children rule** leaves room for "none" within Laya's option budget. When a node
+  outgrows it, add an intermediate group, and have a human approve it.
+
 ### Shortlisting with sentence-transformers
 
 The default `hashing` embedder only matches shared words. To match paraphrases, use a
@@ -197,7 +220,7 @@ The output looks like this (probabilities come from the model and will differ):
 
 ```text
 Draft ODD with 3 parameters written to odd.draft.yaml.
-Resolved against core@0.1.0 with the laya resolver: 2 matched, 1 new.
+Resolved against core@0.2.0 with the laya resolver: 2 matched, 1 new.
   'murky water'                    -> turbidity  (p=0.93)
   'strong current'                 -> current_speed  (p=0.88)
   'jacket legs'                    -> jacket_leg_spacing  NEW ONTOLOGY ENTRY (p=0.81)
@@ -225,6 +248,64 @@ provenance. Review the draft and set `provenance.approved: true` on what you acc
 approved, `verdy ontology add odd.draft.yaml --ontology core -o my-ontology.yaml` copies
 the new entries into your own ontology, so the next ODD resolves them with no LLM
 authoring.
+
+### Walking the tree with Laya
+
+`--resolver laya-tree` has Laya descend the ontology tree instead of choosing from a flat
+shortlist. At each level, it picks among the node's children (each shown as a gloss of
+about ten words) or "none":
+
+- **Beam, not greedy.** When the top two branches are close, both are kept, so one early
+  mistake doesn't send the match down the wrong subtree. The final probability is the
+  product along the path.
+- **"None" is informative.** `water → water_optical`, then "none", means a new entry is
+  needed, and it belongs under `water_optical`. That placement goes to Claude, which drafts
+  the entry in the right place.
+
+```bash
+verdy author "ROV inspection in murky water near the jacket legs, with a strong current" \
+  --resolver laya-tree --resolver-option checkpoint=./laya_verdy -o odd.draft.yaml
+```
+
+### Training Laya on your approvals
+
+The base Laya checkpoints are a fast base to specialise, not a zero-shot decision engine.
+The walker earns its place once it is fine-tuned on your approval history. Start logging
+approvals today, whatever resolver you use:
+
+```bash
+# 1. Log every approved ODD as phrase -> leaf (also done by `verdy ontology add`)
+verdy ontology log odd.yaml --ontology my-ontology.yaml
+# 2. Optional: synthetic paraphrases, tagged and used for training only
+verdy ontology paraphrase -n 3
+# 3. One example per tree level, from the current tree; stable train / held-out split
+verdy laya dataset --ontology my-ontology.yaml -o laya_data
+# 4. Base checkpoint, then tokenize for Laya's fine-tuning script
+huggingface-cli download convaiinnovations/laya --local-dir laya_base
+verdy laya items laya_data/train.jsonl --model-dir laya_base -o laya_data/train_items.pt
+# 5. Train with Laya's own script (Apple Silicon / CPU; a Kaggle 2xT4 notebook also exists)
+python laya_finetune_typed_decisions_mps.py --model-dir laya_base \
+  --items laya_data/train_items.pt --output-dir laya_verdy --micro-batch 1 --grad-accum 32
+# 6. Promote only if per-level accuracy and calibration beat the current checkpoint
+verdy laya eval laya_data/heldout.jsonl --checkpoint ./laya_verdy --baseline english
+# 7. Retrain every few hundred new approvals
+verdy laya due --manifest laya_data/manifest.json --every 300
+```
+
+How the data is built:
+- One approval gives one training example per level, with siblings as hard negatives.
+- Approved new entries give the "none" examples, over a snapshot of the options shown at
+  the time.
+- Restructuring the tree never invalidates the log, because examples are regenerated from
+  the current tree.
+
+When to switch: under ~100 entries for one customer, embeddings plus the LLM are enough.
+Fine-tuned Laya pays off with hundreds of entries, many domain packs, offline sites or
+audit requirements. For the first few hundred approvals, resolve with `--resolver llm`,
+log everything, and switch to `laya-tree` once it beats the LLM on held-out approvals.
+
+The full walkthrough covers hardware, the training script, the promotion rules and
+scheduling: [docs/laya-finetuning.md](docs/laya-finetuning.md).
 
 ---
 
@@ -420,7 +501,9 @@ per-spec robustness, feedback), versioned in `verdy/spec/index_v1.sql`. Query it
 | `verdy verify report.json` | Check a report's digest and signature |
 | `verdy plan --max-failure-prob 0.01` | Runs needed to demonstrate a target |
 | `verdy author "description" [--resolver laya]` | Draft an ODD: Claude extracts, the ontology resolver matches, Claude writes only new entries |
-| `verdy ontology list` / `verdy ontology add odd.yaml --ontology FILE` | Show the parameter ontology / add approved new entries to it |
+| `verdy ontology list` / `validate` / `render` | Show the ontology tree / check it (15 children per node) / render its LLM skill |
+| `verdy ontology log` / `add` / `paraphrase` | Log approvals as phrase → leaf / also add approved new entries / add synthetic paraphrases |
+| `verdy laya dataset` / `items` / `eval` / `due` | Fine-tune the Laya tree walker: export data, tokenize, gate promotion, schedule retraining |
 | `verdy improve improve.yaml` | Run the closed improvement loop: test, train, re-certify |
 | `verdy run run.yaml --store` | Also keep traces as Parquet and index the report |
 | `verdy history home-navigator` | Verdicts across policy versions, with regressions flagged |
@@ -459,7 +542,8 @@ and everything Verdy prints, logs or stores is redacted. Details:
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Install, run the example, evaluate your own policy |
 | [ODD specification](docs/odd-spec.md) | The ODD document format |
-| [Ontology and resolvers](docs/ontology.md) | LLM → shortlist → resolver (`exact`, Laya, `llm`) → LLM authoring, and growing the ontology |
+| [Ontology and resolvers](docs/ontology.md) | The ontology tree, the rendered skill, LLM → shortlist → resolver (`exact`, Laya, `laya-tree`, `llm`) → LLM authoring, the approval log |
+| [Laya fine-tuning](docs/laya-finetuning.md) | Training the Laya tree walker on your approvals, evaluating it per level, promoting it |
 | [Safety specs (STL)](docs/stl-specs.md) | Writing requirements and how robustness works |
 | [Scenario sampling](docs/sampling.md) | Samplers and when to use them |
 | [Execution backends](docs/backends.md) | Simulators, log replay, SceneSmith, HIL |
@@ -480,7 +564,8 @@ Verdy/
 ├── pyproject.toml            # Package metadata, dependencies, tool settings
 ├── verdy/
 │   ├── spec/                 # Versioned JSON Schemas (ODD, STL specs, ontology), core ontology
-│   ├── odd/                  # ODD model, validation, constraints, authoring, ontology, resolvers
+│   ├── odd/                  # ODD model, validation, authoring, ontology tree, skill, resolvers, approval log
+│   ├── finetune/             # Laya training data, items, evaluation and promotion gate
 │   ├── sampler/              # Monte Carlo, stratified, importance, replay samplers
 │   ├── backends/             # Backend interface, sim2d, replay, SceneSmith, function adapter
 │   ├── metrics/              # STL specs and robustness scoring (RTAMT)
@@ -498,6 +583,7 @@ Verdy/
 │   ├── home_robot/           # Full evaluation and improvement loop on the built-in simulator
 │   ├── log_replay/           # Scoring recorded runs
 │   └── scenesmith/           # Pick and place on SceneSmith-generated homes
+├── skills/ontology-core/     # LLM skill rendered from the core ontology (generated)
 ├── docs/                     # Guides and the ODD specification
 └── tests/                    # pytest suite
 ```
@@ -589,7 +675,7 @@ output below is real; re-recording produces the same numbers.
 
 ## Project status
 
-Verdy `0.6.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
+Verdy `0.7.0` is **alpha**: the pipeline works end to end and is tested, but APIs and file
 formats may change before `1.0`. Known limitations:
 
 - The built-in simulator is a teaching and testing tool. Results from it say nothing about
