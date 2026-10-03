@@ -197,18 +197,16 @@ def test_llm_resolver_batches_one_call():
     assert out[1].decision == "none" and out[1].proposed == "made_up"
 
 
-class AlwaysNone(Resolver):
-    name = "always-none"
-
-    def resolve(self, candidate, options, context):
-        return self._decide(candidate, options, None, 1.0)
-
-
 def test_make_resolver(tmp_path, monkeypatch):
     assert isinstance(make_resolver("exact"), ExactResolver)
     assert make_resolver("exact", min_probability=0.7).min_probability == 0.7
     (tmp_path / "myres.py").write_text(
-        "from tests.test_ontology import AlwaysNone\nmake = AlwaysNone\n")
+        "from verdy.odd.resolve import Resolver\n\n"
+        "class AlwaysNone(Resolver):\n"
+        "    name = 'always-none'\n\n"
+        "    def resolve(self, candidate, options, context):\n"
+        "        return self._decide(candidate, options, None, 1.0)\n\n"
+        "make = AlwaysNone\n")
     monkeypatch.chdir(tmp_path)
     assert make_resolver("myres:make").name == "always-none"
     with pytest.raises(ValueError, match="unknown resolver"):
