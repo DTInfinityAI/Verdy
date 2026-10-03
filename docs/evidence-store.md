@@ -42,17 +42,60 @@ Policy home-navigator
 
 ## Traces
 
-`.verdy/store/<sha256>.parquet` holds one trace: a `time` column and one `float64` column
-per signal, with the address and trace format version in the file metadata. Float64
-round-trips exactly, so reloading a trace and hashing it reproduces its address;
-`LocalStore.get_trace` checks this on every read and rejects a file that does not match.
-Files are written atomically.
+Every trace's address is its canonical SHA-256, the `trace_sha256` its report records.
+Float64 round-trips exactly, so reloading a trace and hashing it reproduces its address;
+`get_trace` checks this on every read and rejects data that does not match. Files are
+written atomically.
+
+Traces are **batched**: many per Parquet file, in `.verdy/store/batches/<batch>.parquet`.
+
+| Column | Type | Holds |
+| --- | --- | --- |
+| `trace_sha256` | string | The trace's address |
+| `signal` | string | Signal name; `time` holds the time stamps |
+| `values` | list of float64 | The signal's samples |
+
+There is one row per trace and signal, sorted by address, in small row groups with
+statistics on `trace_sha256`, so reading one trace skips the rest of the file. A batch is
+named after the SHA-256 of the addresses it holds, so batch files are content-addressed
+too. Traces are buffered while a run executes and written as one batch file per run (or
+every 1000 traces), before the report is written.
+
+Which batch holds a trace is read from the batch files themselves, so there is no
+separate catalog to keep in sync. In the home-robot example, 2,962 distinct traces from
+3,000 runs take 3 files and 7.5 MB. With one file per trace they took 2,962 files holding
+16.4 MB, or 35 MB of disk space once each small file's partly filled disk blocks are
+counted. Reading one trace from a batch takes about 4 ms.
 
 Query traces directly from DuckDB:
 
 ```sql
-SELECT max(speed) FROM read_parquet('.verdy/store/<sha256>.parquet');
+-- Peak speed of one run
+SELECT list_max(values) AS peak_speed
+FROM read_parquet('.verdy/store/batches/*.parquet')
+WHERE trace_sha256 = '<trace_sha256 from the report>' AND signal = 'speed';
+
+-- Closest approach to the person in every stored run
+SELECT trace_sha256, list_min(values) AS min_gap
+FROM read_parquet('.verdy/store/batches/*.parquet')
+WHERE signal = 'dist_obstacle'
+ORDER BY min_gap LIMIT 10;
 ```
+
+### Single-file traces and compaction
+
+Verdy 0.4 stored one trace per file, at `.verdy/store/<sha256>.parquet`. Those files stay
+readable, side by side with batches. `verdy store compact` packs them into batch files:
+each trace is verified before packing and read back from its batch before its single file
+is deleted. `verdy store stats` shows how many traces are in each form.
+
+```console
+$ verdy store compact
+Packed 2962 single-file trace(s) into 3 batch file(s); 16.4 MB -> 7.5 MB
+```
+
+`ParquetTraceStore(root, layout="single")` still writes one file per trace, if you need
+it.
 
 ## Storing and indexing
 
@@ -61,6 +104,8 @@ SELECT max(speed) FROM read_parquet('.verdy/store/<sha256>.parquet');
 | `verdy run CONFIG --store [PATH]` | Saves every run's trace to the store (default `.verdy/store`) and indexes the report. Also settable as `store:` in the run config. |
 | `verdy index [PATHS...]` | Indexes report files, or directories searched for `*.report.json` (default: `.`). Re-indexing a report replaces its rows. |
 | `verdy index --rebuild` | Drops the index and rebuilds it from every report it knew about, plus any paths given. |
+| `verdy store stats` | Traces, batch files and size of the trace store. |
+| `verdy store compact` | Packs single-file traces (Verdy 0.4) into batch files. |
 
 Before indexing, each report's digest is checked. A modified report is not indexed: it
 is listed as skipped, and recorded as invalid under the digest its contents actually hash
@@ -178,9 +223,6 @@ code.
 
 ## Limits
 
-- Small Parquet files carry a fixed overhead (roughly 10 KB per trace in the home-robot
-  example). For very large campaigns, batching many traces per file is a planned
-  optimization; addresses stay the same.
 - The local store is single-user: DuckDB allows one writer at a time. Multi-team storage
   is a separate `Store` implementation.
 - Sensor-rich runs (images, point clouds) are not covered by the Parquet trace format yet;

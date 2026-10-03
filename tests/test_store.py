@@ -39,8 +39,8 @@ TRACE = {"time": [0.0, 0.1, 0.2], "speed": [0.0, 0.30000000000000004, 1 / 3],
 # -- traces ---------------------------------------------------------------------------------
 
 
-def test_trace_store_is_content_addressed(tmp_path):
-    store = ParquetTraceStore(tmp_path)
+def test_single_file_layout_is_content_addressed(tmp_path):
+    store = ParquetTraceStore(tmp_path, layout="single")
     sha = store.put(TRACE)
     assert sha == sha256_of(TRACE)  # the same hash reports record as trace_sha256
     assert store.path(sha) == tmp_path / f"{sha}.parquet"
@@ -52,8 +52,8 @@ def test_trace_store_is_content_addressed(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_trace_store_detects_tampering(tmp_path):
-    store = ParquetTraceStore(tmp_path)
+def test_single_file_layout_detects_tampering(tmp_path):
+    store = ParquetTraceStore(tmp_path, layout="single")
     sha = store.put(TRACE)
     other = store.put({**TRACE, "dist": [9.0, 9.0, 9.0]})
     shutil.copyfile(store.path(other), store.path(sha))
@@ -241,7 +241,9 @@ def test_cli_store_index_history_query(tmp_path, capsys, monkeypatch):
                  "--policy-version", "1.2.0-rc1"]) in (0, 1, 3)  # not stored yet
     out = capsys.readouterr().out
     assert "Traces stored and report indexed in .verdy/store" in out
-    assert len(list((work / ".verdy" / "store").glob("*.parquet"))) > 100
+    batches = list((work / ".verdy" / "store" / "batches").glob("*.parquet"))
+    assert len(batches) == 2  # one batch file per run of 80 traces
+    assert not list((work / ".verdy" / "store").glob("*.parquet"))
 
     assert main(["index", "reports"]) == 0
     assert "Indexed: 3 report(s)" in capsys.readouterr().out
@@ -271,3 +273,112 @@ def test_cli_history_fails_on_regression(three_versions, capsys):
     assert main(["history", "nav", "--store", root]) == 0
     assert "REGRESSION" in capsys.readouterr().out
     assert main(["history", "nav", "--store", root, "--fail-on-regression"]) == 1
+
+
+# -- batched traces --------------------------------------------------------------------------
+
+
+def make_traces(n, offset=0.0):
+    return [{"time": [0.0, 0.1, 0.2], "speed": [i + offset, i / 3, 0.1 * i],
+             "dist": [2.0, 1.0 / (i + 1), -float(i)]} for i in range(n)]
+
+
+def test_batched_layout_round_trip(tmp_path):
+    store = ParquetTraceStore(tmp_path, batch_size=4, row_group_traces=2)
+    traces = make_traces(10)
+    shas = [store.put(t) for t in traces]
+    assert shas == [sha256_of(t) for t in traces]
+    batches = sorted((tmp_path / "batches").glob("*.parquet"))
+    assert len(batches) == 2  # two full batches of 4 written; 2 traces still buffered
+    assert store.stats().buffered_traces == 2
+    assert store.get(shas[-1]) == traces[-1]  # readable from the buffer
+    assert store.flush() is not None and store.flush() is None
+    fresh = ParquetTraceStore(tmp_path)  # catalog rebuilt from the batch files
+    for sha, trace in zip(shas, traces, strict=True):
+        assert fresh.has(sha) and fresh.get(sha) == trace
+    st = fresh.stats()
+    assert (st.batch_files, st.batched_traces, st.single_files) == (3, 10, 0)
+    assert not list(tmp_path.glob("*.parquet"))
+
+
+def test_batches_are_content_addressed_and_deduplicated(tmp_path):
+    a, b = ParquetTraceStore(tmp_path / "a"), ParquetTraceStore(tmp_path / "b")
+    traces = make_traces(5)
+    for t in traces:
+        a.put(t)
+    for t in reversed(traces):
+        b.put(t)
+    assert a.flush().name == b.flush().name  # same contents, same batch name
+    for t in traces:
+        a.put(t)  # already stored: nothing buffered
+    assert a.flush() is None
+    assert len(list((tmp_path / "a" / "batches").glob("*.parquet"))) == 1
+
+
+def test_batched_layout_detects_tampering(tmp_path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    store = ParquetTraceStore(tmp_path)
+    sha = store.put(make_traces(1)[0])
+    batch = store.flush()
+    table = pq.read_table(batch)
+    values = table.column("values").to_pylist()
+    values[1] = [9.0, 9.0, 9.0]
+    pq.write_table(table.set_column(2, "values", pa.array(values,
+                                                          type=pa.list_(pa.float64()))), batch)
+    with pytest.raises(TraceIntegrityError):
+        ParquetTraceStore(tmp_path).get(sha)
+
+
+def test_compact_packs_single_files(tmp_path):
+    single = ParquetTraceStore(tmp_path, layout="single")
+    traces = make_traces(7)
+    shas = [single.put(t) for t in traces]
+    assert len(single.single_files()) == 7
+    store = ParquetTraceStore(tmp_path, batch_size=3)
+    assert store.compact() == (7, 3)
+    assert store.single_files() == []
+    fresh = ParquetTraceStore(tmp_path)
+    assert [fresh.get(s) for s in shas] == traces
+    assert fresh.stats().batch_files == 3
+    kept = ParquetTraceStore(tmp_path / "k", layout="single")
+    kept.put(traces[0])
+    assert ParquetTraceStore(tmp_path / "k").compact(delete=False) == (1, 1)
+    assert len(kept.single_files()) == 1
+
+
+def test_mixed_layouts_and_validation(tmp_path):
+    traces = make_traces(2)
+    old = ParquetTraceStore(tmp_path, layout="single").put(traces[0])  # Verdy 0.4 store
+    store = ParquetTraceStore(tmp_path)
+    new = store.put(traces[1])
+    store.flush()
+    assert store.get(old) == traces[0] and store.get(new) == traces[1]
+    assert store.put(traces[0]) == old and store.flush() is None  # already stored
+    with pytest.raises(KeyError):
+        store.get("f" * 64)
+    with pytest.raises(ValueError):
+        ParquetTraceStore(tmp_path, layout="zip")
+    with pytest.raises(ValueError):
+        ParquetTraceStore(tmp_path, batch_size=0)
+
+
+def test_local_store_close_flushes(tmp_path):
+    with LocalStore(tmp_path) as store:
+        sha = store.put_trace(make_traces(1)[0])
+        assert not (tmp_path / "batches").exists()
+    assert LocalStore(tmp_path).has_trace(sha)
+
+
+def test_cli_store_stats_and_compact(tmp_path, capsys):
+    single = ParquetTraceStore(tmp_path, layout="single")
+    for t in make_traces(5):
+        single.put(t)
+    assert main(["store", "stats", "--store", str(tmp_path)]) == 0
+    assert "single-file: 5 trace(s)  (run `verdy store compact`" in capsys.readouterr().out
+    assert main(["store", "compact", "--store", str(tmp_path), "--batch-size", "2"]) == 0
+    assert "Packed 5 single-file trace(s) into 3 batch file(s)" in capsys.readouterr().out
+    assert main(["store", "stats", "--store", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "5 traces" in out and "5 traces in 3 batch file(s)" in out

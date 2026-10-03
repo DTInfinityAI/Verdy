@@ -62,6 +62,9 @@ class Store(ABC):
     @abstractmethod
     def has_trace(self, sha256: str) -> bool: ...
 
+    def flush(self) -> None:
+        """Persist buffered traces. Called by :meth:`close`."""
+
     # -- index ----------------------------------------------------------------------------
 
     @abstractmethod
@@ -81,7 +84,8 @@ class Store(ABC):
         """Run a read-only SQL query on the index; returns column names and rows."""
 
     def close(self) -> None:
-        """Release resources."""
+        """Persist buffered traces and release resources."""
+        self.flush()
 
     def __enter__(self) -> Store:
         return self

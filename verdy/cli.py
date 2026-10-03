@@ -128,6 +128,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         progress=progress, fingerprint=cfg.fingerprint,
         trace_sink=store.put_trace if store else None,
     )
+    if store is not None:
+        store.flush()  # traces are on disk before the report that points at them
     if not args.quiet:
         print(file=sys.stderr)
     report = result.report
@@ -161,6 +163,37 @@ def cmd_index(args: argparse.Namespace) -> int:
             print(f"skipped {path}: {reason}")
         print(f"{'Rebuilt index' if args.rebuild else 'Indexed'}: {len(result.indexed)} "
               f"report(s) in {args.store}")
+    return 0
+
+
+def _size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+def cmd_store_stats(args: argparse.Namespace) -> int:
+    from verdy.store import ParquetTraceStore
+
+    st = ParquetTraceStore(args.store).stats()
+    print(f"Store {args.store}: {st.traces} traces, {_size(st.bytes_on_disk)}")
+    print(f"  batched:     {st.batched_traces} traces in {st.batch_files} batch file(s)")
+    print(f"  single-file: {st.single_files} trace(s)"
+          + ("  (run `verdy store compact` to batch them)" if st.single_files else ""))
+    return 0
+
+
+def cmd_store_compact(args: argparse.Namespace) -> int:
+    from verdy.store import ParquetTraceStore
+
+    store = ParquetTraceStore(args.store, batch_size=args.batch_size)
+    before = store.stats().bytes_on_disk
+    traces, batches = store.compact(delete=not args.keep)
+    after = store.stats().bytes_on_disk
+    print(f"Packed {traces} single-file trace(s) into {batches} batch file(s); "
+          f"{_size(before)} -> {_size(after)}")
     return 0
 
 
@@ -286,10 +319,81 @@ def cmd_author(args: argparse.Namespace) -> int:
     description = Path(args.from_file).read_text("utf-8") if args.from_file else args.description
     if not description:
         return _err("give a description or --from-file")
-    odd = draft_odd(description, model=args.model)
+    import yaml
+
+    ontology = None if args.ontology == "none" else args.ontology
+    options = {}
+    for item in args.resolver_option or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            return _err(f"--resolver-option expects KEY=VALUE, got {item!r}")
+        options[key.replace("-", "_")] = yaml.safe_load(value)
+    if args.min_probability is not None:
+        options["min_probability"] = args.min_probability
+    odd = draft_odd(description, model=args.model, ontology=ontology, resolver=args.resolver,
+                    resolver_options=options, embedder=args.embedder, top_k=args.top_k)
     save_odd(odd, args.output)
     print(f"Draft ODD with {len(odd.parameters)} parameters written to {args.output}.")
+    if ontology is not None:
+        _print_resolutions(odd)
     print("Review every parameter, then set provenance.approved: true on the ones you accept.")
+    return 0
+
+
+def _print_resolutions(odd) -> None:
+    meta = (odd.metadata or {}).get("authoring", {})
+    print(f"Resolved against {meta.get('ontology')} with the {meta.get('resolver')} resolver: "
+          f"{meta.get('matched', 0)} matched, {meta.get('new_entries', 0)} new.")
+    for p in odd.parameters:
+        r = p.provenance.get("resolution") or {}
+        said = r.get("phrase") or r.get("candidate") or p.name
+        prob = f"p={r['probability']:.2f}" if "probability" in r else "p=n/a"
+        if p.provenance.get("new_ontology_entry"):
+            print(f"  {said!r:<32} -> {p.name}  NEW ONTOLOGY ENTRY ({prob})")
+        else:
+            print(f"  {said!r:<32} -> {p.name}  ({prob})")
+    for c in meta.get("dropped_constraints", []):
+        print(f"  dropped constraint {c!r}: it names a parameter that was not kept")
+
+
+def cmd_ontology_list(args: argparse.Namespace) -> int:
+    from verdy.odd.ontology import load_ontology
+
+    onto = load_ontology(args.ontology)
+    print(f"{onto.ref}: {len(onto)} entries")
+    for e in onto.entries:
+        unit = f" [{e.unit}]" if e.unit else ""
+        print(f"  {e.name:<24} {e.category:<12} {e.type:<12}{unit}  {e.description}")
+    return 0
+
+
+def cmd_ontology_add(args: argparse.Namespace) -> int:
+    from verdy.odd import load_odd
+    from verdy.odd.ontology import BUNDLED, OntologyEntry, load_ontology, save_ontology
+
+    if args.ontology in BUNDLED and not args.output:
+        return _err(f"{args.ontology} is bundled with Verdy; write the extended copy with -o FILE")
+    onto = load_ontology(args.ontology)
+    odd = load_odd(args.odd)
+    added, skipped = [], []
+    for p in odd.parameters:
+        if not p.provenance.get("new_ontology_entry"):
+            continue
+        if not p.approved:
+            skipped.append(f"{p.name} (not approved)")
+            continue
+        if p.name in onto:
+            skipped.append(f"{p.name} (already in {onto.ref})")
+            continue
+        phrase = (p.provenance.get("resolution") or {}).get("phrase")
+        onto.add(OntologyEntry.from_parameter(p, [phrase] if phrase else []))
+        added.append(p.name)
+    output = args.output or args.ontology
+    if added:
+        save_ontology(onto, output)
+    print(f"Added {len(added)} entries to {output}: {', '.join(added) or '-'}")
+    for s in skipped:
+        print(f"  skipped {s}")
     return 0
 
 
@@ -336,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate", help="validate ODD and STL spec files")
     p.add_argument("files", nargs="+")
     p.add_argument("--strict", action="store_true",
-                   help="treat unapproved LLM-authored parameters as errors")
+                   help="treat unapproved machine-drafted (LLM or ontology) parameters as errors")
     p.set_defaults(func=cmd_validate)
 
     p = sub.add_parser("sample", help="print scenarios sampled from an ODD")
@@ -374,6 +478,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rebuild", action="store_true",
                    help="drop the index and rebuild it from all known reports")
     p.set_defaults(func=cmd_index)
+
+    p = sub.add_parser("store", help="inspect or compact the trace store")
+    store_sub = p.add_subparsers(dest="store_command", required=True)
+    q = store_sub.add_parser("stats", help="traces, files and size of the store")
+    q.add_argument("--store", default=".verdy/store")
+    q.set_defaults(func=cmd_store_stats)
+    q = store_sub.add_parser("compact", help="pack single-file traces into batch files")
+    q.add_argument("--store", default=".verdy/store")
+    q.add_argument("--batch-size", type=int, default=1000, help="traces per batch file")
+    q.add_argument("--keep", action="store_true", help="keep the single files")
+    q.set_defaults(func=cmd_store_compact)
 
     p = sub.add_parser("history", help="verdicts of a policy across versions")
     p.add_argument("policy", nargs="?", help="policy name (substring match); omit to list")
@@ -417,7 +532,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-file", help="read the description from a file")
     p.add_argument("-o", "--output", default="odd.draft.yaml")
     p.add_argument("--model", default="claude-opus-5-5")
+    p.add_argument("--ontology", default="core",
+                   help="bundled ontology name or file to resolve against (default core); "
+                        "'none' lets Claude write every parameter")
+    p.add_argument("--resolver", default="exact",
+                   help="exact (default), laya (local, pip install 'verdy[laya]'), llm, "
+                        "or module:attribute")
+    p.add_argument("--resolver-option", action="append", metavar="KEY=VALUE",
+                   help="option for the resolver, e.g. checkpoint=multilingual (repeatable)")
+    p.add_argument("--min-probability", type=float,
+                   help="resolver probability below which a match counts as none (default 0.5)")
+    p.add_argument("--embedder", default="hashing",
+                   help="shortlist embedder: hashing (default) or sentence-transformers[:MODEL]")
+    p.add_argument("--top-k", type=int, default=15, help="shortlist size (default 15)")
     p.set_defaults(func=cmd_author)
+
+    p = sub.add_parser("ontology", help="list or extend a parameter ontology")
+    onto_sub = p.add_subparsers(dest="ontology_command", required=True)
+    q = onto_sub.add_parser("list", help="list the entries of an ontology")
+    q.add_argument("ontology", nargs="?", default="core", help="bundled name or file")
+    q.set_defaults(func=cmd_ontology_list)
+    q = onto_sub.add_parser(
+        "add", help="add an ODD's approved new_ontology_entry parameters to an ontology")
+    q.add_argument("odd")
+    q.add_argument("--ontology", required=True, help="ontology file (or core with -o)")
+    q.add_argument("-o", "--output", help="write here instead of updating --ontology")
+    q.set_defaults(func=cmd_ontology_add)
 
     p = sub.add_parser("secrets", help="check credentials without revealing them")
     secrets_sub = p.add_subparsers(dest="secrets_command", required=True)
@@ -430,7 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.set_defaults(func=cmd_secrets_scan)
 
     p = sub.add_parser("schema", help="print a bundled JSON Schema")
-    p.add_argument("name", choices=["odd", "stl_specs"])
+    p.add_argument("name", choices=["odd", "stl_specs", "ontology"])
     p.set_defaults(func=cmd_schema)
     return parser
 

@@ -3,11 +3,12 @@
 Layout::
 
     .verdy/store/
-    ├── <sha256>.parquet     traces, content-addressed
-    └── index.duckdb         evidence index (schema: verdy/spec/index_v<N>.sql)
+    ├── batches/<batch>.parquet   traces, many per file, addressed by trace SHA-256
+    ├── <sha256>.parquet          single-file traces (Verdy 0.4; `verdy store compact`)
+    └── index.duckdb              evidence index (schema: verdy/spec/index_v<N>.sql)
 
-Query traces directly from SQL with ``read_parquet('.verdy/store/<sha256>.parquet')``, or
-all of them at once with ``read_parquet('.verdy/store/*.parquet', filename = true)``.
+Query batched traces from SQL with
+``read_parquet('.verdy/store/batches/*.parquet') WHERE trace_sha256 = '...'``.
 """
 from __future__ import annotations
 
@@ -47,12 +48,13 @@ def _duckdb():
 
 
 class LocalStore(Store):
-    def __init__(self, root: str | Path = DEFAULT_STORE) -> None:
+    def __init__(self, root: str | Path = DEFAULT_STORE, layout: str = "batched",
+                 batch_size: int = 1000) -> None:
         _duckdb()  # fail fast, before any run, if the store extra is missing
         _pyarrow()
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
-        self.traces = ParquetTraceStore(self.root)
+        self.traces = ParquetTraceStore(self.root, layout=layout, batch_size=batch_size)
         self._con: Any = None
 
     # -- traces -------------------------------------------------------------------------
@@ -65,6 +67,9 @@ class LocalStore(Store):
 
     def has_trace(self, sha256: str) -> bool:
         return self.traces.has(sha256)
+
+    def flush(self) -> None:
+        self.traces.flush()
 
     # -- database -----------------------------------------------------------------------
 
@@ -93,6 +98,7 @@ class LocalStore(Store):
                 "source of truth, so nothing is lost)")
 
     def close(self) -> None:
+        self.flush()
         if self._con is not None:
             self._con.close()
             self._con = None

@@ -1,4 +1,4 @@
-# ODD specification (v0.2.0)
+# ODD specification (v0.3.0)
 
 An **Operational Design Domain** (ODD) describes the conditions a robot policy is expected
 to operate in. Verdy samples test scenarios from it, measures how much of it a test
@@ -7,7 +7,7 @@ campaign covered, and states every verdict relative to it: a `PASS` means "safe 
 
 This document is the normative description of ODD documents. The machine-readable form is
 the JSON Schema in [`verdy/spec/odd.schema.json`](../verdy/spec/odd.schema.json)
-(`$id: https://dti.ai/verdy/spec/odd/0.2.0`); print it with `verdy schema odd`.
+(`$id: https://dti.ai/verdy/spec/odd/0.3.0`); print it with `verdy schema odd`.
 
 ## Document format
 
@@ -15,7 +15,7 @@ An ODD is a YAML or JSON document. Unknown fields are errors, so typos are caugh
 
 | Field | Type | Required | Description |
 | --- | --- | :---: | --- |
-| `spec_version` | string | | Meta-schema version the document targets, e.g. `0.2.0`. |
+| `spec_version` | string | | Meta-schema version the document targets, e.g. `0.3.0`. |
 | `name` | string | ✅ | Name of the domain. |
 | `version` | string | ✅ | Version of this ODD. Bump it whenever the domain changes. |
 | `description` | string | | What the domain covers, in plain language. |
@@ -40,7 +40,7 @@ Each parameter is one dimension along which conditions vary.
 | `distribution` | string | | Nominal [distribution](#distributions). |
 | `default` | any | | Typical value; must lie in the domain. |
 | `grounding` | object | | Where the parameter lives in each system: `sim` (simulator key) and `runtime` (on-robot source, e.g. a topic). |
-| `provenance` | object | | Who defined the parameter: `source` (`human`, `llm` or `log`), `confidence` (0–1), `approved` (bool), `note`. |
+| `provenance` | object | | Who defined the parameter: `source` (`human`, `llm`, `log` or `ontology`), `confidence` (0–1), `approved` (bool), `note`; for drafted parameters also `resolution`, `new_ontology_entry` and `also_mentioned_as` (see [provenance](#provenance-and-llm-authoring)). |
 
 ### Categories
 
@@ -102,10 +102,23 @@ Samplers draw scenarios from the nominal distribution *conditioned on* the const
 
 ## Provenance and LLM authoring
 
-`verdy author "..."` drafts an ODD with Claude. Every parameter it writes is marked
-`provenance: {source: llm, confidence: <0-1>, approved: false}`. Unapproved LLM parameters
-are warnings in normal validation and errors with `verdy validate --strict`, so a human has
-to review each one and set `approved: true` before strict pipelines accept the ODD.
+`verdy author "..."` drafts an ODD with Claude, resolving what the description mentions
+against a parameter ontology first (see [ontology and resolvers](ontology.md)):
+
+- A parameter taken from the ontology has `source: ontology`. Its `confidence` is the
+  resolver's probability.
+- A parameter Claude wrote because the ontology had no entry has `source: llm` and
+  `new_ontology_entry: true`.
+- `resolution` records how the wording was resolved: `resolver`, `model`, `decision` (entry
+  name or `none`), `probability`, `candidate` (the extracted name), `phrase` (the words in
+  the description), `proposed` (a rejected choice), `reason`, `ontology` (`name@version`),
+  `embedder` and the top of the `shortlist` with scores.
+- `also_mentioned_as` lists other phrases that resolved to the same parameter.
+
+Every drafted parameter starts with `approved: false`. Unapproved `llm` and `ontology`
+parameters are warnings in normal validation and errors with `verdy validate --strict`, so a
+human has to review each one and set `approved: true` before strict pipelines accept the
+ODD.
 
 ## Validation
 
@@ -115,12 +128,12 @@ to review each one and set `approved: true` before strict pipelines accept the O
 2. **Semantics:** unique names; numeric types have a valid `range`; categorical values are
    unique; `weights` match `values`; the distribution parses and fits the type and range;
    `default` is in the domain; constraints parse and reference only known parameters;
-   approval status of LLM-authored parameters.
+   approval status of drafted (`llm` and `ontology`) parameters.
 
 ## Example
 
 ```yaml
-spec_version: 0.2.0
+spec_version: 0.3.0
 name: home-robot-kitchen-crossing
 version: 0.1.0
 parameters:
@@ -150,6 +163,8 @@ The complete version is [`examples/home_robot/odd.yaml`](../examples/home_robot/
 ## Versioning
 
 The meta-schema follows semantic versioning. While it is `0.x`, minor versions may make
-breaking changes. Changes from `0.1.0`: added `spec_version`, `description`, `metadata`,
+breaking changes. Changes from `0.2.0` (additive; every `0.2.0` document is valid `0.3.0`):
+provenance `source: ontology`, `resolution`, `new_ontology_entry` and `also_mentioned_as`.
+Changes from `0.1.0`: added `spec_version`, `description`, `metadata`,
 parameter `description`, `weights`, `default` and `provenance.note`; unknown fields are
 now rejected; `provenance.confidence` must be in [0, 1].

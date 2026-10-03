@@ -7,6 +7,7 @@ from typing import Any
 CATEGORIES = ("environment", "platform", "task", "sensors", "faults")
 TYPES = ("continuous", "categorical", "boolean", "temporal")
 NUMERIC_TYPES = ("continuous", "temporal")
+MACHINE_SOURCES = ("llm", "ontology")  # drafted by authoring; need human approval
 
 
 @dataclass
@@ -37,8 +38,9 @@ class Parameter:
 
     @property
     def approved(self) -> bool:
-        """LLM-authored parameters count as approved only when a human signed off."""
-        if self.provenance.get("source") == "llm":
+        """Machine-drafted parameters (``llm``, ``ontology``) count as approved only when a
+        human signed off."""
+        if self.provenance.get("source") in MACHINE_SOURCES:
             return bool(self.provenance.get("approved", False))
         return self.provenance.get("approved", True)
 
