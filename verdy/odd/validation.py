@@ -32,8 +32,8 @@ class ValidationReport:
 def check_odd(data: dict[str, Any], *, strict: bool = False) -> ValidationReport:
     """Validate an ODD document and return all errors and warnings.
 
-    With ``strict=True``, LLM-authored parameters that a human has not approved are errors
-    instead of warnings.
+    With ``strict=True``, machine-drafted parameters (LLM or ontology) that a human has not
+    approved are errors instead of warnings.
     """
     from verdy.sampler.distributions import DistributionError, distribution_for
 
@@ -65,7 +65,8 @@ def check_odd(data: dict[str, Any], *, strict: bool = False) -> ValidationReport
         if p.default is not None and not _in_domain(p, p.default):
             report.errors.append(f"{p.name}: default {p.default!r} is outside the domain")
         if not p.approved:
-            msg = f"{p.name}: LLM-authored parameter has not been approved by a human"
+            source = p.provenance.get("source")
+            msg = f"{p.name}: {source}-drafted parameter has not been approved by a human"
             (report.errors if strict else report.warnings).append(msg)
 
     try:

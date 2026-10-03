@@ -319,10 +319,81 @@ def cmd_author(args: argparse.Namespace) -> int:
     description = Path(args.from_file).read_text("utf-8") if args.from_file else args.description
     if not description:
         return _err("give a description or --from-file")
-    odd = draft_odd(description, model=args.model)
+    import yaml
+
+    ontology = None if args.ontology == "none" else args.ontology
+    options = {}
+    for item in args.resolver_option or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            return _err(f"--resolver-option expects KEY=VALUE, got {item!r}")
+        options[key.replace("-", "_")] = yaml.safe_load(value)
+    if args.min_probability is not None:
+        options["min_probability"] = args.min_probability
+    odd = draft_odd(description, model=args.model, ontology=ontology, resolver=args.resolver,
+                    resolver_options=options, embedder=args.embedder, top_k=args.top_k)
     save_odd(odd, args.output)
     print(f"Draft ODD with {len(odd.parameters)} parameters written to {args.output}.")
+    if ontology is not None:
+        _print_resolutions(odd)
     print("Review every parameter, then set provenance.approved: true on the ones you accept.")
+    return 0
+
+
+def _print_resolutions(odd) -> None:
+    meta = (odd.metadata or {}).get("authoring", {})
+    print(f"Resolved against {meta.get('ontology')} with the {meta.get('resolver')} resolver: "
+          f"{meta.get('matched', 0)} matched, {meta.get('new_entries', 0)} new.")
+    for p in odd.parameters:
+        r = p.provenance.get("resolution") or {}
+        said = r.get("phrase") or r.get("candidate") or p.name
+        prob = f"p={r['probability']:.2f}" if "probability" in r else "p=n/a"
+        if p.provenance.get("new_ontology_entry"):
+            print(f"  {said!r:<32} -> {p.name}  NEW ONTOLOGY ENTRY ({prob})")
+        else:
+            print(f"  {said!r:<32} -> {p.name}  ({prob})")
+    for c in meta.get("dropped_constraints", []):
+        print(f"  dropped constraint {c!r}: it names a parameter that was not kept")
+
+
+def cmd_ontology_list(args: argparse.Namespace) -> int:
+    from verdy.odd.ontology import load_ontology
+
+    onto = load_ontology(args.ontology)
+    print(f"{onto.ref}: {len(onto)} entries")
+    for e in onto.entries:
+        unit = f" [{e.unit}]" if e.unit else ""
+        print(f"  {e.name:<24} {e.category:<12} {e.type:<12}{unit}  {e.description}")
+    return 0
+
+
+def cmd_ontology_add(args: argparse.Namespace) -> int:
+    from verdy.odd import load_odd
+    from verdy.odd.ontology import BUNDLED, OntologyEntry, load_ontology, save_ontology
+
+    if args.ontology in BUNDLED and not args.output:
+        return _err(f"{args.ontology} is bundled with Verdy; write the extended copy with -o FILE")
+    onto = load_ontology(args.ontology)
+    odd = load_odd(args.odd)
+    added, skipped = [], []
+    for p in odd.parameters:
+        if not p.provenance.get("new_ontology_entry"):
+            continue
+        if not p.approved:
+            skipped.append(f"{p.name} (not approved)")
+            continue
+        if p.name in onto:
+            skipped.append(f"{p.name} (already in {onto.ref})")
+            continue
+        phrase = (p.provenance.get("resolution") or {}).get("phrase")
+        onto.add(OntologyEntry.from_parameter(p, [phrase] if phrase else []))
+        added.append(p.name)
+    output = args.output or args.ontology
+    if added:
+        save_ontology(onto, output)
+    print(f"Added {len(added)} entries to {output}: {', '.join(added) or '-'}")
+    for s in skipped:
+        print(f"  skipped {s}")
     return 0
 
 
@@ -369,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate", help="validate ODD and STL spec files")
     p.add_argument("files", nargs="+")
     p.add_argument("--strict", action="store_true",
-                   help="treat unapproved LLM-authored parameters as errors")
+                   help="treat unapproved machine-drafted (LLM or ontology) parameters as errors")
     p.set_defaults(func=cmd_validate)
 
     p = sub.add_parser("sample", help="print scenarios sampled from an ODD")
@@ -461,7 +532,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-file", help="read the description from a file")
     p.add_argument("-o", "--output", default="odd.draft.yaml")
     p.add_argument("--model", default="claude-opus-5-5")
+    p.add_argument("--ontology", default="core",
+                   help="bundled ontology name or file to resolve against (default core); "
+                        "'none' lets Claude write every parameter")
+    p.add_argument("--resolver", default="exact",
+                   help="exact (default), laya (local, pip install 'verdy[laya]'), llm, "
+                        "or module:attribute")
+    p.add_argument("--resolver-option", action="append", metavar="KEY=VALUE",
+                   help="option for the resolver, e.g. checkpoint=multilingual (repeatable)")
+    p.add_argument("--min-probability", type=float,
+                   help="resolver probability below which a match counts as none (default 0.5)")
+    p.add_argument("--embedder", default="hashing",
+                   help="shortlist embedder: hashing (default) or sentence-transformers[:MODEL]")
+    p.add_argument("--top-k", type=int, default=15, help="shortlist size (default 15)")
     p.set_defaults(func=cmd_author)
+
+    p = sub.add_parser("ontology", help="list or extend a parameter ontology")
+    onto_sub = p.add_subparsers(dest="ontology_command", required=True)
+    q = onto_sub.add_parser("list", help="list the entries of an ontology")
+    q.add_argument("ontology", nargs="?", default="core", help="bundled name or file")
+    q.set_defaults(func=cmd_ontology_list)
+    q = onto_sub.add_parser(
+        "add", help="add an ODD's approved new_ontology_entry parameters to an ontology")
+    q.add_argument("odd")
+    q.add_argument("--ontology", required=True, help="ontology file (or core with -o)")
+    q.add_argument("-o", "--output", help="write here instead of updating --ontology")
+    q.set_defaults(func=cmd_ontology_add)
 
     p = sub.add_parser("secrets", help="check credentials without revealing them")
     secrets_sub = p.add_subparsers(dest="secrets_command", required=True)
@@ -474,7 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.set_defaults(func=cmd_secrets_scan)
 
     p = sub.add_parser("schema", help="print a bundled JSON Schema")
-    p.add_argument("name", choices=["odd", "stl_specs"])
+    p.add_argument("name", choices=["odd", "stl_specs", "ontology"])
     p.set_defaults(func=cmd_schema)
     return parser
 

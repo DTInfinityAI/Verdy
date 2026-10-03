@@ -1,0 +1,229 @@
+# Verdy core parameter ontology. Canonical names, units and physical bounds for ODD
+# parameters that recur across robots and customers. Ranges are physical bounds; an ODD
+# narrows them to the conditions it covers.
+name: core
+version: 0.1.0
+description: Common operating-condition parameters for mobile, manipulation and marine robots.
+entries:
+  # --- environment: light and weather ---
+  - name: lighting
+    description: Ambient light at the robot's working height.
+    category: environment
+    type: continuous
+    unit: lux
+    range: [0.1, 100000]
+    distribution: loguniform
+    synonyms: [illumination, ambient light, brightness, light level, darkness, dim, dusk]
+    grounding: {sim: lighting_lux}
+  - name: glare
+    description: Direct sunlight or reflections shining into the cameras.
+    category: environment
+    type: boolean
+    distribution: bernoulli(0.1)
+    synonyms: [sun glare, low sun, reflections, specular highlights]
+  - name: rain_rate
+    description: Rainfall intensity.
+    category: environment
+    type: continuous
+    unit: mm/h
+    range: [0, 100]
+    synonyms: [rain, precipitation, drizzle, downpour, wet weather]
+  - name: fog_visibility
+    description: Meteorological visibility distance in fog, haze or smoke.
+    category: environment
+    type: continuous
+    unit: m
+    range: [10, 10000]
+    distribution: loguniform
+    synonyms: [fog, haze, mist, smoke, visibility]
+  - name: wind_speed
+    description: Mean wind speed at the robot.
+    category: environment
+    type: continuous
+    unit: m/s
+    range: [0, 30]
+    synonyms: [wind, gusts, breeze]
+  - name: ambient_temperature
+    description: Air or water temperature around the robot.
+    category: environment
+    type: continuous
+    unit: degC
+    range: [-40, 60]
+    synonyms: [temperature, heat, cold, freezing]
+  # --- environment: water ---
+  - name: turbidity
+    description: Suspended particles in water that reduce optical visibility.
+    category: environment
+    type: continuous
+    unit: NTU
+    range: [0.1, 1000]
+    distribution: loguniform
+    synonyms: [murky water, muddy water, water clarity, underwater visibility, silt]
+  - name: current_speed
+    description: Speed of the water current relative to the seabed.
+    category: environment
+    type: continuous
+    unit: m/s
+    range: [0, 5]
+    synonyms: [current, tidal current, water flow, strong current]
+  - name: wave_height
+    description: Significant wave height at the surface.
+    category: environment
+    type: continuous
+    unit: m
+    range: [0, 15]
+    synonyms: [waves, sea state, swell, choppy water]
+  - name: water_depth
+    description: Depth of water at the work site.
+    category: environment
+    type: continuous
+    unit: m
+    range: [0, 3000]
+    synonyms: [depth, operating depth]
+  - name: marine_growth
+    description: Thickness of biofouling on submerged structures.
+    category: environment
+    type: continuous
+    unit: mm
+    range: [0, 300]
+    synonyms: [biofouling, fouling, barnacles, mussels, marine fouling]
+  # --- environment: terrain and space ---
+  - name: floor_type
+    description: Floor or ground surface along the route; sets traction.
+    category: environment
+    type: categorical
+    values: [tile, wood, carpet, rug, wet_tile, concrete, asphalt, gravel, grass, mud, sand, ice]
+    synonyms: [floor, surface, ground, terrain type, flooring]
+  - name: surface_friction
+    description: Tyre-ground or foot-ground friction coefficient.
+    category: environment
+    type: continuous
+    range: [0.05, 1.2]
+    synonyms: [friction, traction, slippery, grip]
+  - name: slope
+    description: Inclination of the ground along the route.
+    category: environment
+    type: continuous
+    unit: deg
+    range: [0, 45]
+    synonyms: [incline, gradient, ramp, hill]
+  - name: room_type
+    description: Room the task takes place in.
+    category: environment
+    type: categorical
+    values: [kitchen, living room, bedroom, bathroom, home office, hallway, warehouse aisle]
+    synonyms: [room, location, area]
+  - name: room_area
+    description: Floor area of the room or workspace.
+    category: environment
+    type: continuous
+    unit: m^2
+    range: [2, 5000]
+    synonyms: [room size, workspace size, floor area]
+  - name: clutter
+    description: How many unrelated objects are in the workspace.
+    category: environment
+    type: categorical
+    values: [tidy, moderate, cluttered]
+    synonyms: [mess, untidy, obstacles on surfaces]
+  - name: obstacle_density
+    description: Static obstacles per unit floor area.
+    category: environment
+    type: continuous
+    unit: 1/m^2
+    range: [0, 2]
+    synonyms: [obstacles, furniture density, crowding by objects]
+  # --- environment: people and agents ---
+  - name: person_speed
+    description: Walking speed of a person moving near the robot.
+    category: environment
+    type: continuous
+    unit: m/s
+    range: [0, 3]
+    distribution: normal(1.0, 0.3)
+    synonyms: [walking speed, pedestrian speed, human speed]
+  - name: pedestrian_density
+    description: People per unit floor area around the robot.
+    category: environment
+    type: continuous
+    unit: 1/m^2
+    range: [0, 2]
+    synonyms: [crowd, crowd density, people around, busy]
+  # --- platform ---
+  - name: max_speed
+    description: Speed limit configured on the robot base.
+    category: platform
+    type: continuous
+    unit: m/s
+    range: [0, 5]
+    synonyms: [speed limit, top speed, velocity limit]
+  - name: payload_mass
+    description: Mass of the load the robot carries or manipulates.
+    category: platform
+    type: continuous
+    unit: kg
+    range: [0, 500]
+    synonyms: [payload, load, carried weight, object mass]
+  - name: battery_level
+    description: Battery state of charge.
+    category: platform
+    type: continuous
+    range: [0, 1]
+    synonyms: [state of charge, battery, charge level, low battery]
+  # --- task ---
+  - name: goal_distance
+    description: Straight-line distance from start to goal.
+    category: task
+    type: continuous
+    unit: m
+    range: [0, 1000]
+    synonyms: [route length, travel distance, distance to goal]
+  - name: target_object
+    description: The object the robot has to find or manipulate.
+    category: task
+    type: categorical
+    values: [mug, bowl, bottle, box, book, tool]
+    synonyms: [target, object to pick, item]
+  # --- sensors ---
+  - name: sensor_range
+    description: Maximum range at which the perception system reports detections.
+    category: sensors
+    type: continuous
+    unit: m
+    range: [0.1, 200]
+    synonyms: [detection range, perception range, lidar range, camera range]
+  - name: localization_noise
+    description: Standard deviation of the robot's position estimate error.
+    category: sensors
+    type: continuous
+    unit: m
+    range: [0, 5]
+    synonyms: [localization error, pose noise, position uncertainty, drift]
+  - name: gnss_availability
+    description: Whether satellite positioning is available.
+    category: sensors
+    type: boolean
+    distribution: bernoulli(0.9)
+    synonyms: [gps, gnss, satellite fix, gps denied]
+  # --- faults ---
+  - name: sensor_dropout
+    description: Probability that a perception frame is lost.
+    category: faults
+    type: continuous
+    range: [0, 1]
+    distribution: beta(1, 8)
+    synonyms: [frame drops, dropped frames, sensor outage, camera dropout]
+  - name: comms_latency
+    description: Round-trip latency of the link to the operator or fleet server.
+    category: faults
+    type: continuous
+    unit: ms
+    range: [1, 10000]
+    distribution: loguniform
+    synonyms: [latency, network delay, lag, tether delay, acoustic link delay]
+  - name: comms_loss
+    description: Whether the link to the operator or fleet server drops out.
+    category: faults
+    type: boolean
+    distribution: bernoulli(0.05)
+    synonyms: [link loss, connection loss, network outage, lost comms]

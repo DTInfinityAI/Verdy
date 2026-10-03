@@ -3,7 +3,7 @@ import json
 from functools import cache
 from importlib import resources
 
-ODD_SPEC_VERSION = "0.2.0"
+ODD_SPEC_VERSION = "0.3.0"
 STL_SPEC_VERSION = "0.2.0"
 INDEX_SCHEMA_VERSION = 1
 TRACE_FORMAT_VERSION = "1"          # single-file traces: <sha256>.parquet

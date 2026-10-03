@@ -3,7 +3,8 @@
 | Guide | What it covers |
 | --- | --- |
 | [Getting started](getting-started.md) | Install, run the example, evaluate your own policy |
-| [ODD specification](odd-spec.md) | The ODD document format (v0.2.0): parameters, distributions, constraints, provenance |
+| [ODD specification](odd-spec.md) | The ODD document format (v0.3.0): parameters, distributions, constraints, provenance |
+| [Ontology and resolvers](ontology.md) | Resolving descriptions to a shared parameter ontology: shortlist, `exact` / `laya` / `llm` resolvers, provenance, growing the ontology |
 | [Safety specs (STL)](stl-specs.md) | Writing STL requirements and how robustness is scored |
 | [Scenario sampling](sampling.md) | Monte Carlo, stratified, importance sampling, log replay |
 | [Execution backends](backends.md) | Built-in simulator, log replay, SceneSmith, custom simulators and HIL |

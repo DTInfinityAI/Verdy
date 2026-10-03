@@ -4,6 +4,35 @@ All notable changes to Verdy are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.6.0] - 2026-10-03
+
+### Added
+
+- Ontology-resolved ODD authoring. `verdy author` runs LLM → shortlist → resolver → LLM:
+  Claude extracts candidate parameters with ranges, an embedding shortlist keeps the top-k
+  ontology entries per candidate, a resolver picks the matching entry or `none` with a
+  probability, and Claude writes definitions only for the misses (flagged
+  `new_ontology_entry`). Matched parameters take the ontology's name, unit, bounds,
+  distribution and grounding. See [docs/ontology.md](docs/ontology.md).
+- Resolver plug-ins (`verdy.odd.resolve`): `exact` (string match on names and synonyms),
+  `laya` (the open-weight Laya decision model run locally, `pip install "verdy[laya]"`, no
+  API key), `llm` (Claude, one call for all candidates), or `module:attribute`.
+- Parameter ontologies (`verdy.odd.ontology`): a versioned schema
+  (`verdy schema ontology`), a bundled `core` ontology with 31 entries, and
+  `verdy ontology list` / `verdy ontology add` to grow the ontology from approved ODDs.
+- Shortlist embedders: `hashing` (local, no dependencies) or
+  `sentence-transformers[:MODEL]`.
+
+### Changed
+
+- ODD spec 0.3.0 (additive): provenance `source: ontology`, `resolution` (resolver, model,
+  decision, probability, phrase, shortlist, ontology), `new_ontology_entry` and
+  `also_mentioned_as`. Reports embed the ODD, so the evidence shows why "murky water"
+  became `turbidity`.
+- Parameters with `source: ontology` need human approval, like `source: llm`.
+- `verdy author` resolves against the `core` ontology with the `exact` resolver by default;
+  `--ontology none` restores the 0.5 behaviour (Claude writes every parameter).
+
 ## [0.5.0] - 2026-10-02
 
 ### Added
