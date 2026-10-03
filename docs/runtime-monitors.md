@@ -3,6 +3,18 @@
 The specs a policy is tested against can also run on the robot, flagging violations as
 they happen. `verdy.monitor.RuntimeMonitor` evaluates specs online with RTAMT.
 
+```mermaid
+flowchart LR
+    specs[("specs.yaml<br/>the specs the policy was tested against")] --> check{"Monitorable<br/>online?"}
+    check -->|"always(f) becomes historically(f)"| monitor["RuntimeMonitor<br/>past-time STL with RTAMT"]
+    check -->|"explicit monitor: formula"| monitor
+    check -->|"needs the future, e.g. reach the goal within 20 s"| skipped["Skipped and listed<br/>skip_unmonitorable=True"]
+    robot["Robot signals<br/>one sample every dt seconds"] -->|"monitor.update(sample)"| monitor
+    monitor --> status{"MonitorStatus<br/>robustness per spec"}
+    status -->|"ok: next sample"| robot
+    status -->|"violated, latched for the episode"| stop["Safe stop<br/>reason: status.violated"]
+```
+
 ```python
 from verdy.metrics import load_specs
 from verdy.monitor import RuntimeMonitor
