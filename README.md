@@ -546,10 +546,21 @@ Every Verdy test shows where a policy is fragile, by how much it nearly failed, 
 which conditions. `verdy improve` turns that into a closed loop: **test, find
 weaknesses, train on them, re-certify.**
 
-```
- diagnose ─▶ rewards + human feedback ─▶ failure map + curriculum ─▶ train ─▶ re-certify ─┐
-    ▲             (RLHF)                    (targeted practice)                (held out)   │
-    └──────────────────────── promote only if proven no worse ◀─────────────────────────────┘
+```mermaid
+flowchart TD
+    demos["Expert demonstrations<br/>recorded operator sessions"] -->|"pretrain (behavior cloning)"| policy
+    policy["Incumbent policy"] --> diagnose["1. Diagnose<br/>test on a fresh ODD sample, keep traces"]
+    diagnose --> reward["2. Reward<br/>safety margins + bounded preference reward"]
+    operators(["Operators compare pairs of runs"]) --> feedback
+    reward --> feedback["3. Human feedback (RLHF)<br/>most informative pairs, Bradley-Terry reward model"]
+    feedback --> target["4. Target<br/>failure map + curriculum near failures"]
+    target --> train["5. Train<br/>pluggable trainer: built-in search, TRL, SB3, LeRobot, any command"]
+    train --> candidate["Candidate policy"]
+    candidate --> certify{"6. Re-certify on held-out seeds<br/>candidate vs incumbent"}
+    policy --> certify
+    certify -->|"no worse, guards hold: promote"| policy
+    certify -.->|"worse or a guard regressed: keep incumbent"| policy
+    certify --> report[("Signed loop report<br/>final certified verdict")]
 ```
 
 | What it does | How |
