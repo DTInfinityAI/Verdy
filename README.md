@@ -158,6 +158,8 @@ parameters and an embedder shortlists matching entries from the
 [parameter ontology](docs/ontology.md). A resolver picks the matching entry, and Claude
 writes only the parameters the ontology doesn't have yet.
 
+### Shortlisting with sentence-transformers
+
 The default `hashing` embedder only matches shared words. To match paraphrases, use a
 local [sentence-transformers](https://www.sbert.net/) model instead:
 
@@ -178,8 +180,51 @@ odd = draft_odd(description, ontology="core", resolver="laya",
                 embedder="sentence-transformers:all-MiniLM-L6-v2", top_k=20)
 ```
 
+### Resolving with Laya
+
+[Laya](https://github.com/NandhaKishorM/laya) is an open-weight decision model that runs
+locally, with no API key. For each candidate it answers one multiple-choice question
+whose options are the shortlisted entries plus `none`, and it returns a probability.
+Install it, then pass `--resolver laya`:
+
+```bash
+pip install -e ".[llm,laya]"      # Laya pulls in PyTorch; weights download on first use
+verdy author "ROV inspection in murky water near the jacket legs, with a strong current" \
+  --resolver laya --min-probability 0.6 -o odd.draft.yaml
+```
+
+The output looks like this (probabilities come from the model and will differ):
+
+```text
+Draft ODD with 3 parameters written to odd.draft.yaml.
+Resolved against core@0.1.0 with the laya resolver: 2 matched, 1 new.
+  'murky water'                    -> turbidity  (p=0.93)
+  'strong current'                 -> current_speed  (p=0.88)
+  'jacket legs'                    -> jacket_leg_spacing  NEW ONTOLOGY ENTRY (p=0.81)
+Review every parameter, then set provenance.approved: true on the ones you accept.
+```
+
+A match below `--min-probability` (default 0.5) counts as `none`, so Claude writes a new
+entry for it and records the rejected choice as `proposed`. To pin a Laya checkpoint
+instead of letting Laya's router pick one, add `--resolver-option checkpoint=multilingual`
+(or `english`). From Python:
+
+```python
+from verdy.odd.authoring import draft_odd
+from verdy.odd.resolve import LayaResolver
+
+odd = draft_odd(description, ontology="core",
+                resolver=LayaResolver(min_probability=0.6, checkpoint="english"))
+print(odd["turbidity"].provenance["resolution"])
+# {'resolver': 'laya', 'model': 'laya:english', 'decision': 'turbidity',
+#  'probability': 0.93, 'candidate': 'water_clarity', 'phrase': 'murky water', ...}
+```
+
 Each parameter records the embedder, its shortlist and the resolver's decision in its
-provenance. Review the draft and set `provenance.approved: true` on what you accept.
+provenance. Review the draft and set `provenance.approved: true` on what you accept. Once
+approved, `verdy ontology add odd.draft.yaml --ontology core -o my-ontology.yaml` copies
+the new entries into your own ontology, so the next ODD resolves them with no LLM
+authoring.
 
 ---
 
